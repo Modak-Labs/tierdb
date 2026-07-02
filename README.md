@@ -5,7 +5,7 @@ Modak lets Postgres be the bounded, transactional hot tier of a table whose cold
 - A **tiered** table keeps only its recent partitions in Postgres and moves the rest to Iceberg. A **mirrored** table keeps the full copy in Postgres while CDC trails every change into the lake, optionally shedding heap history it no longer needs hot.
 - Either way, a thin open seam (a monotonic cut-line, a pinned lake snapshot, and a PK-keyed correction delta merged on read) stitches the tiers so every query sees a consistent point-in-time view, no duplicates and no gaps. Both tiers stay real, independently usable open systems: a Postgres you can run OLTP on, an Iceberg any engine can read. Modak owns only the glue.
 
-![Modak console demo](docs/assets/console.gif)
+https://github.com/addu390/modak/raw/main/docs/assets/console.mp4
 
 ## Installation
 
