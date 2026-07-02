@@ -1,0 +1,100 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  extension:
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [15, 16, 17]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Postgres ${{ matrix.pg }} dev headers (PGDG)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-server-dev-${{ matrix.pg }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: extension
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version 0.16.1 --locked
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg${{ matrix.pg }} /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
+
+      - name: Package the extension
+        working-directory: extension/crates/modak-pg
+        run: |
+          cargo pgrx package --no-default-features --features pg${{ matrix.pg }} \
+              --pg-config /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
+
+      - name: Create tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCH="$(uname -m)"
+          OUT="modak-${VERSION}-pg${{ matrix.pg }}-linux-${ARCH}"
+          tar -C "extension/target/release/modak-pg${{ matrix.pg }}" -czf "${OUT}.tar.gz" .
+          echo "TARBALL=${OUT}.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension-pg${{ matrix.pg }}-${{ matrix.runner }}
+          path: ${{ env.TARBALL }}
+          if-no-files-found: error
+
+  worker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build the worker and console jars
+        working-directory: worker
+        run: mvn -B package -DskipTests
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jars
+          path: |
+            worker/modak-worker/target/modak-worker.jar
+            worker/modak-console/target/modak-console.jar
+          if-no-files-found: error
+
+  release:
+    needs: [extension, worker]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Rename jars with the version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mv dist/modak-worker.jar "dist/modak-worker-${VERSION}.jar"
+          mv dist/modak-console.jar "dist/modak-console-${VERSION}.jar"
+          ls -la dist/
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
