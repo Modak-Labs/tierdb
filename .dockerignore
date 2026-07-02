@@ -1,0 +1,7 @@
+worker/**/target/
+extension/target/
+docs/
+site/
+temp/
+example/
+.git/

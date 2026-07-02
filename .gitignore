@@ -1,0 +1,28 @@
+# Rust
+/extension/target/
+**/target/
+Cargo.lock
+*.rs.bk
+
+# Java / Maven
+**/target/
+*.class
+dependency-reduced-pom.xml
+.mvn/wrapper/maven-wrapper.jar
+
+# pgrx
+*.so
+*.dylib
+/extension/**/*.received.*
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Local
+*.log
+/tmp/
+/temp/
+/site/

@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/modak-core",
+    "crates/modak-pg",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/modak/modak"
+rust-version = "1.82"
+
+[workspace.dependencies]
+modak-core = { path = "crates/modak-core" }
+thiserror = "1"

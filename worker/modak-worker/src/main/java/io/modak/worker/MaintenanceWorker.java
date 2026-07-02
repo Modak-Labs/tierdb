@@ -1,0 +1,59 @@
+package io.modak.worker;
+
+import io.modak.catalog.Catalog;
+import io.modak.catalog.RegisteredTable;
+import io.modak.catalog.TieringOp;
+import io.modak.common.LakeSnapshotId;
+import io.modak.lake.CommitterInitContext;
+import io.modak.lake.LakeStorage;
+import io.modak.lake.LakeTieringProps;
+import io.modak.lake.MaintenanceConfig;
+import io.modak.lake.MaintenanceResult;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * The lake maintenance loop for one table: bin-pack small data files and expire
+ * old snapshots, gated on the pinned reader horizon (nothing at or above the
+ * oldest pinned S is ever expired). Both halves are single atomic lake commits —
+ * a crash mid-pass loses nothing, the next pass just re-runs.
+ */
+final class MaintenanceWorker {
+
+    private final Catalog catalog;
+    private final LakeStorage lake;
+    private final MaintenanceConfig config;
+
+    MaintenanceWorker(Catalog catalog, LakeStorage lake, MaintenanceConfig config) {
+        this.catalog = Objects.requireNonNull(catalog);
+        this.lake = Objects.requireNonNull(lake);
+        this.config = Objects.requireNonNull(config);
+    }
+
+    MaintenanceResult runCycle(RegisteredTable table) {
+        LakeSnapshotId pinned = catalog.readHorizon(table.id()).snapshot();
+        UUID opId = UUID.randomUUID();
+        MaintenanceResult result = lake.maintain(
+                new CommitterInitContext(table.id(), table.lakeTableRef()),
+                config, pinned, snapshotProps(table, opId));
+        if (!result.isNoop()) {
+            catalog.logOpPhase(opId, table.id(), TieringOp.KIND_MAINTENANCE,
+                    TieringOp.PHASE_ADVANCED, null,
+                    "{\"rewritten\":" + result.rewrittenFiles()
+                            + ",\"added\":" + result.addedFiles()
+                            + ",\"expired_snapshots\":" + result.expiredSnapshots() + "}");
+        }
+        return result;
+    }
+
+    private static Map<String, String> snapshotProps(RegisteredTable table, UUID opId) {
+        Map<String, String> props = new HashMap<>();
+        props.put(LakeTieringProps.OP_ID, opId.toString());
+        props.put(LakeTieringProps.OP_KIND, LakeTieringProps.OP_KIND_MAINTENANCE);
+        props.put(LakeTieringProps.TABLE_ID, Long.toString(table.id().oid()));
+        props.put(LakeTieringProps.COMMIT_USER, LakeTieringProps.COMMIT_USER_MAINTENANCE);
+        return props;
+    }
+}

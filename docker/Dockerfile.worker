@@ -1,0 +1,14 @@
+# Build from the repo root. Default binary is modak-console (worker + web console);
+# headless: --build-arg MODAK_BINARY=modak-worker
+
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build/worker
+COPY worker/ .
+COPY sql/ /build/sql/
+RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests package
+
+FROM eclipse-temurin:21-jre
+ARG MODAK_BINARY=modak-console
+COPY --from=build /build/worker/${MODAK_BINARY}/target/${MODAK_BINARY}.jar /opt/modak/modak.jar
+ENTRYPOINT ["java", "-jar", "/opt/modak/modak.jar"]
+CMD ["run"]

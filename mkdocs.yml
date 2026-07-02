@@ -1,0 +1,72 @@
+site_name: Modak
+site_description: >-
+  Postgres as the transactional hot tier of a table whose colder history
+  lives in Apache Iceberg — queried as one logical table.
+site_url: https://addu390.github.io/modak/
+repo_url: https://github.com/addu390/modak
+repo_name: addu390/modak
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.sections
+    - navigation.footer
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: false
+  - pymdownx.inlinehilite
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart: getting-started/quickstart.md
+      - Concepts: getting-started/concepts.md
+  - Guides:
+      - Registering tables: guides/registering-tables.md
+      - Reading: guides/reading.md
+      - Corrections & schema changes: guides/corrections.md
+      - Production deployment: guides/production.md
+      - Console: guides/console.md
+      - Operations: guides/operations.md
+  - Reference:
+      - SQL API: reference/sql.md
+      - CLI: reference/cli.md
+      - Configuration: reference/configuration.md
+      - Catalog schema: reference/catalog.md
+      - Metrics: reference/metrics.md
+  - Architecture: architecture.md

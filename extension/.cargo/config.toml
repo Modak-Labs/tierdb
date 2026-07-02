@@ -1,0 +1,5 @@
+# pgrx extensions link as a cdylib, but Postgres backend symbols (palloc, errstart,
+# ...) only exist at runtime inside the postgres process. Tell the macOS linker to
+# allow those undefined symbols; they resolve when Postgres dlopen()s the extension.
+[target.'cfg(target_os="macos")']
+rustflags = ["-Clink-arg=-Wl,-undefined,dynamic_lookup"]
