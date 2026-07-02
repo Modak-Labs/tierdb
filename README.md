@@ -2,39 +2,33 @@
 
 Modak lets Postgres be the bounded, transactional hot tier of a table whose colder history lives in an open lakehouse (Iceberg), and queries across both tiers as one logical table with transactional-grade read consistency.
 
-Each table chooses how the two share its rows. A **tiered** table keeps only its recent partitions in Postgres and moves the rest to Iceberg. A **mirrored** table keeps the full copy in Postgres while CDC trails every change into the lake, optionally shedding heap history it no longer needs hot. Either way, a thin open seam (a monotonic cut-line, a pinned lake snapshot, and a PK-keyed correction delta merged on read) stitches the tiers so every query sees a consistent point-in-time view, no duplicates and no gaps. Both tiers stay real, independently usable open systems: a Postgres you can run OLTP on, an Iceberg any engine can read. Modak owns only the glue.
+- A **tiered** table keeps only its recent partitions in Postgres and moves the rest to Iceberg. A **mirrored** table keeps the full copy in Postgres while CDC trails every change into the lake, optionally shedding heap history it no longer needs hot.
+- Either way, a thin open seam (a monotonic cut-line, a pinned lake snapshot, and a PK-keyed correction delta merged on read) stitches the tiers so every query sees a consistent point-in-time view, no duplicates and no gaps. Both tiers stay real, independently usable open systems: a Postgres you can run OLTP on, an Iceberg any engine can read. Modak owns only the glue.
 
-## Repository layout
+![Modak console demo](docs/assets/console.gif)
 
-```
-modak/
-├── docs/          Documentation
-├── example/       Scripted end-to-end walkthrough against the local stack
-├── sql/           modak.* catalog schema (the cross-language contract)
-├── extension/     The Postgres extension (Rust workspace, runs inside your Postgres)
-│   └── crates/
-│       ├── modak-core/   Pure consistency domain (no Postgres deps)
-│       └── modak-pg/     pgrx extension: planner, write router, read-pin, pg_duckdb bridge
-└── worker/        The worker fleet (Java Maven reactor, runs alongside Postgres)
-    ├── modak-common/        Shared value types
-    ├── modak-catalog/       Catalog facade over modak.* (JDBC)
-    ├── modak-lake-api/      Pluggable lake ports (LakeWriter, LakeCommitter, ...)
-    ├── modak-lake-iceberg/  iceberg-java implementation
-    ├── modak-tiering/       Tiering worker (seal → flush → advance → reclaim)
-    ├── modak-compaction/    Compaction worker (fold delta → cold)
-    ├── modak-worker/        Headless daemon + CLI (the core deployable)
-    └── modak-console/       Optional: worker + embedded web console in one binary
+## Installation
+
+Run the full loop locally with Docker:
+
+```bash
+git clone https://github.com/addu390/modak && cd modak
+docker compose up -d --build
+./example/run.sh
 ```
 
-## Status
+That brings up Postgres with the extension, MinIO as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).
 
-Functional end to end: tiering, compaction, transparent reads, and CDC-mirrored tables all work against the Dockerized stack (see [`docker/README.md`](docker/README.md) and [`example/`](example/README.md)). The worker embeds a web console (`http://localhost:9090` in the stack) with live per-table status and charts. Not yet production-hardened.
+For the guided version, start with the [quickstart](https://addu390.github.io/modak/getting-started/quickstart/). For pointing the worker at your own Postgres and object store, see [production deployment](https://addu390.github.io/modak/guides/production/).
 
-## Architecture at a glance
+## Documentation
 
-- **Read path:** Modak resolves the read-pin `(T, S, delta)` and rewrites the query into `recent (tier_key ≥ T) ⊕ cold-merge(Iceberg@S, delta)`. Execution runs in DuckDB via [`pg_duckdb`](https://github.com/duckdb/pg_duckdb). Modak owns planning, metadata, and consistency, DuckDB only executes.
-- **Write path:** tiered tables route each record by its immutable tier-key vs the cut-line `T`. Recent rows go to the hot Postgres partition, older and backfill rows go to Iceberg (buffered via `modak.delta` and compaction). The tier-key decides, never the connector. Mirrored tables take plain DML and CDC does the rest.
-- **Coordination:** the `modak` Postgres catalog. No cross-language RPC in v1.
+Full docs at [addu390.github.io/modak](https://addu390.github.io/modak/):
+
+- [Concepts](https://addu390.github.io/modak/getting-started/concepts/): table modes, tier key, cut-line, pinned snapshot, delta
+- [Guides](https://addu390.github.io/modak/guides/registering-tables/): registering tables, reading, corrections, operations
+- [Reference](https://addu390.github.io/modak/reference/sql/): SQL API, CLI, configuration, catalog schema, metrics
+- [Architecture](https://addu390.github.io/modak/architecture/): how the extension, the worker, and the catalog cooperate
 
 ## License
 
