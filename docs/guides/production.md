@@ -56,6 +56,8 @@ java -jar modak-worker.jar run
 - Postgres: any Postgres 16+ with `wal_level = logical`, the `modak` and
   `pg_duckdb` extensions installed, and
   `shared_preload_libraries = 'pg_duckdb, modak'` for transparent reads.
+  [Installation](../getting-started/installation.md) walks through the full
+  postgresql.conf and DuckDB setup.
 - Workers: one or more instances. They campaign for a leader lease (a
   session-scoped advisory lock) and fail over automatically, including the
   mirrored tables' replication slots, whose stale holders are evicted.

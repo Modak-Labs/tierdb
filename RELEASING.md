@@ -2,7 +2,7 @@
 
 Releases are cut from a version tag. Pushing `vX.Y.Z` runs
 `.github/workflows/release.yml`, which packages the extension for Postgres
-15, 16, and 17 on x86_64 and arm64 Linux, builds the worker and console jars,
+16 and 17 on x86_64 and arm64 Linux, builds the worker and console jars,
 and attaches everything to a GitHub release.
 
 ## Cutting a release
@@ -35,12 +35,6 @@ it at startup, so it needs no extension upgrade script.
 
 ## Installing a packaged build
 
-Each tarball mirrors the layout `pg_config` reports, so it extracts onto the
-filesystem root:
-
-```bash
-sudo tar -xzf modak-X.Y.Z-pg17-linux-x86_64.tar.gz -C /
-```
-
-Then set `shared_preload_libraries = 'pg_duckdb, modak'`, restart Postgres,
-and `CREATE EXTENSION modak`.
+See [Installation](docs/getting-started/installation.md) for the full manual
+setup: the tarball extract, postgresql.conf, the DuckDB extensions and S3
+secret, and running the worker.
