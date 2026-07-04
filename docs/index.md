@@ -8,7 +8,7 @@ against the whole timeline: `SELECT`, `INSERT`, `UPDATE`, and `DELETE` reach
 any row, wherever it lives.
 
 <video controls muted playsinline style="width: 100%; border-radius: 8px;">
-  <source src="assets/modak-console.mp4" type="video/mp4">
+  <source src="https://github.com/user-attachments/assets/09966acf-b3d7-4a29-bd57-12bad806772d" type="video/mp4">
 </video>
 
 !!! note "Status: beta"
