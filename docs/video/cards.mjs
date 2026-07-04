@@ -39,11 +39,13 @@ function html({ title, sub, brand = false, small = "" }) {
 }
 
 const cards = {
-  "card-intro": { brand: true, title: "", sub: "Tier-aware data federation between Postgres and Apache Iceberg." },
-  "card-seed": { title: "Start with an ordinary Postgres table", sub: "public.events has 5 rows across 3 range partitions, freshly registered with Modak. Everything is still in Postgres." },
-  "card-sweep": { title: "The worker takes it from here", sub: "Every sweep, partitions behind the high-water mark move into Iceberg. Watch it happen, live." },
+  "card-x-intro": { brand: true, title: "", sub: "Tier-aware data federation between Postgres and Apache Iceberg." },
+  "card-x-outro": { brand: true, title: "", sub: "Tier-aware data federation between Postgres and Apache Iceberg.", small: "watch the demo next &middot; github.com/addu390/modak" },
+  "card-intro": { brand: true, title: "The demo", sub: "An ordinary Postgres table, a worker moving data between tiers, and plain SQL over all of it. Live, no cuts." },
+  "card-table": { title: "Start with an ordinary Postgres table", sub: "public.events has 5 rows across 3 range partitions, freshly registered with Modak. The worker takes it from here." },
   "card-dml": { title: "Plain SQL. Any row. Either tier.", sub: "SELECT, INSERT, UPDATE, DELETE work across the whole timeline. Explain shows exactly where rows come from and go to." },
   "card-fold": { title: "Moments later", sub: "The worker folds the correction into Iceberg. The delta drains to zero, and the corrected row now lives in the lake." },
+  "card-maint": { title: "Maintenance is optional", sub: "Compaction, snapshot expiry, and orphan cleanup run on a schedule with sane defaults. Or trigger a pass yourself: one click in the console, or one CLI command." },
   "card-outro": { brand: true, title: "", sub: "Tier-aware data federation between Postgres and Apache Iceberg.", small: "github.com/addu390/modak &middot; beta" },
 };
 

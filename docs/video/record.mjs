@@ -124,7 +124,7 @@ const scenes = {
     await page.goto(CONSOLE_URL);
     await page.waitForSelector("tbody#fleet tr", { timeout: 30000 });
     await sleep(1500);
-    await clickAt(page, "tbody#fleet tr");
+    await clickAt(page, 'tbody#fleet tr:has-text("events")');
     await page.waitForSelector("#detail-partitions tr", { timeout: 15000 });
     await sleep(2000);
     await page.waitForFunction(() => {
@@ -176,7 +176,6 @@ const scenes = {
     await explainSql(page);
     await zoomTo(page, "#sql-explain-panel", 1.5, 3600);
     await runSql(page);
-    await sleep(800);
     // Catch the delta row before the next worker sweep folds it.
     await setSql(page, "SELECT pk, op, tier_key, payload FROM modak.delta;");
     await runSql(page);
@@ -210,6 +209,29 @@ const scenes = {
     await runSql(page);
     await zoomTo(page, ".sql-results-panel", 1.4, 3200);
     await sleep(600);
+    await done();
+  },
+
+  async maintenance() {
+    const { page, done } = await newScene("maintenance");
+    await page.goto(CONSOLE_URL);
+    await page.waitForSelector("tbody#fleet tr", { timeout: 30000 });
+    await sleep(1200);
+    await clickAt(page, 'tbody#fleet tr:has-text("events")');
+    await page.waitForSelector("#lake-panel:not([hidden])", { timeout: 30000 });
+    await page.locator("#lake-panel").scrollIntoViewIfNeeded();
+    await sleep(1500);
+    await zoomTo(page, "#lake-stats", 1.4, 2600);
+    await clickAt(page, "#maintain-btn");
+    await page.waitForSelector("#maintain-status:not([hidden])", { timeout: 15000 });
+    await sleep(1200);
+    await page.waitForFunction(() => {
+      const t = document.getElementById("lake-maintenance").textContent;
+      return t && t.trim().length > 0;
+    }, { timeout: 120000 });
+    await sleep(1500);
+    await zoomTo(page, "#lake-maintenance", 1.4, 3000);
+    await sleep(800);
     await done();
   },
 

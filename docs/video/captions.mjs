@@ -7,14 +7,15 @@ const OUT = path.join(import.meta.dirname, "build", "caps");
 fs.mkdirSync(OUT, { recursive: true });
 
 const captions = {
-  overview: "The Modak console. Every registered table, its cut-line, and the worker, live.",
+  overview: "The Modak console. Every registered table, its cut-line, its snapshot, and the worker, live.",
   tiering: "Time-lapse. The worker tiers p0 and p1 into Iceberg, then drops them from Postgres.",
-  select: "One plain SELECT returns every row. Hot from the heap, cold from Iceberg.",
+  select: "One plain SELECT returns every row. Recent rows from the heap, history from Iceberg.",
   explain: "Explain shows the routing. The heap for recent rows, a pinned Iceberg snapshot for history.",
   update: "A plain UPDATE of a cold row. Rewritten into two halves, the correction lands in modak.delta.",
-  folded: "The worker folded the delta. The corrected row is now served from Iceberg.",
-  insert: "One INSERT, two destinations. Recent rows hit the heap, historical rows the delta.",
-  outro: "Tiering, folding, partition premake. All background, all visible.",
+  folded: "The delta is empty. The corrected row is now served straight from Iceberg.",
+  insert: "One INSERT, two destinations. The recent row hits the heap, the historical row the delta.",
+  maintenance: "Lake health per table. One click files a maintenance request, the worker journals the pass.",
+  outro: "Tiering, folding, maintenance, partition premake. All background, all visible.",
 };
 
 const html = text => `<!DOCTYPE html><html><head><style>
