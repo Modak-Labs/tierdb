@@ -6,6 +6,13 @@ and CLI, plus an embedded web console served on `MODAK_CONSOLE_PORT` (default
 Zero build step, zero external services: plain HTML/CSS/JS with Apache ECharts
 and CodeMirror bundled as WebJars, served from the jar.
 
+The demo walks through the console live: tiering, cross-tier SQL, the delta
+fold, and an on-demand maintenance pass.
+
+<video controls muted playsinline style="width: 100%; border-radius: 8px;">
+  <source src="https://github.com/user-attachments/assets/c4fc846d-03c8-4234-a307-6274eca34bad" type="video/mp4">
+</video>
+
 ## Overview
 
 ![Console overview](../assets/console-overview.png)

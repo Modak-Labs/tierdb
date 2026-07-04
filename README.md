@@ -8,8 +8,6 @@ Recent rows live in Postgres, history lives in Iceberg, and plain SQL works agai
 
 https://github.com/user-attachments/assets/dc666d8b-ade7-4c56-b5a3-f4bf889d8806
 
-https://github.com/user-attachments/assets/c4fc846d-03c8-4234-a307-6274eca34bad
-
 Tables run **tiered** (Postgres keeps only the recent partitions) or **mirrored** (Postgres keeps everything while CDC trails it into the lake). [Choosing a mode](https://modak-labs.github.io/modak/modes/choosing/) walks the decision, and [the contract](https://modak-labs.github.io/modak/modes/contract/) states exactly what each mode supports.
 
 ## Installation
@@ -23,6 +21,8 @@ docker compose up -d --build
 ```
 
 That brings up Postgres with the extension, MinIO as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).
+
+https://github.com/user-attachments/assets/c4fc846d-03c8-4234-a307-6274eca34bad
 
 For the guided version, start with the [quickstart](https://modak-labs.github.io/modak/getting-started/quickstart/). For pointing the worker at your own Postgres and object store, see [production deployment](https://modak-labs.github.io/modak/operations/production/).
 
