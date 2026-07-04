@@ -23,7 +23,7 @@ final class ConsoleQuery {
         this.dataSource = dataSource;
     }
 
-    String run(String sql) {
+    String run(String sql) throws HttpError {
         long started = System.nanoTime();
         try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
             s.setQueryTimeout(TIMEOUT_SECONDS);
@@ -37,9 +37,7 @@ final class ConsoleQuery {
                 return render(rs, started);
             }
         } catch (Exception e) {
-            long elapsedMs = (System.nanoTime() - started) / 1_000_000;
-            return "{\"error\":" + Json.str(message(e))
-                    + ",\"elapsedMs\":" + elapsedMs + "}";
+            throw sqlError(e, started);
         }
     }
 
@@ -76,8 +74,7 @@ final class ConsoleQuery {
                 + ",\"elapsedMs\":" + elapsedMs + "}";
     }
 
-    /** Runs modak_explain over the statement and returns its report lines. */
-    String explain(String sql) {
+    String explain(String sql) throws HttpError {
         long started = System.nanoTime();
         try (Connection c = dataSource.getConnection();
                 var s = c.prepareStatement("SELECT modak_explain FROM modak_explain(?)")) {
@@ -92,10 +89,14 @@ final class ConsoleQuery {
             long elapsedMs = (System.nanoTime() - started) / 1_000_000;
             return "{\"lines\":" + lines + ",\"elapsedMs\":" + elapsedMs + "}";
         } catch (Exception e) {
-            long elapsedMs = (System.nanoTime() - started) / 1_000_000;
-            return "{\"error\":" + Json.str(message(e))
-                    + ",\"elapsedMs\":" + elapsedMs + "}";
+            throw sqlError(e, started);
         }
+    }
+
+    private static HttpError sqlError(Exception e, long started) {
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+        return HttpError.raw(400, "{\"error\":" + Json.str(message(e))
+                + ",\"elapsedMs\":" + elapsedMs + "}");
     }
 
     private static final String SCHEMA = """

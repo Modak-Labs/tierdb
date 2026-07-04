@@ -64,7 +64,6 @@ public final class LoadOptions {
             return this;
         }
 
-        /** Cold rows above this count per batch are spooled as parquet (default 1000). */
         public Builder spoolThreshold(int threshold) {
             this.spoolThreshold = threshold;
             return this;

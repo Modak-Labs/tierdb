@@ -1,16 +1,17 @@
 package io.modak.lake.iceberg;
 
-import io.modak.common.LakeSnapshotId;
 import io.modak.common.RowBatchData.Column;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.LakeCommitResult;
+import io.modak.lake.commit.LakeCommitResult;
+import io.modak.lake.LakeStats;
 import io.modak.lake.LakeTable;
-import io.modak.lake.MaintenanceConfig;
-import io.modak.lake.MaintenanceResult;
-import io.modak.lake.MergeWriter;
+import io.modak.lake.maintain.MaintenancePlan;
+import io.modak.lake.maintain.MaintenanceResult;
+import io.modak.lake.commit.MergeWriter;
 import io.modak.lake.TierKeyWindow;
 import java.util.List;
 import java.util.Map;
+import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.DeleteFiles;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.expressions.Expression;
@@ -39,19 +40,27 @@ final class IcebergLakeTable implements LakeTable {
     }
 
     @Override
+    public LakeStats stats() {
+        return new IcebergStats(table).collect();
+    }
+
+    @Override
     public void evolveSchema(List<Column> addColumns) {
         new IcebergSchemaEvolution(table).addMissing(addColumns);
     }
 
     @Override
-    public MaintenanceResult maintain(MaintenanceConfig config,
-            LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
+    public MaintenanceResult maintain(MaintenancePlan plan, Map<String, String> snapshotProps) {
         try {
-            return new IcebergMaintenance(table)
-                    .run(config, oldestPinnedSnapshot.id(), snapshotProps);
+            return new IcebergMaintenance(table).run(plan, snapshotProps);
         } catch (Exception e) {
             throw new IllegalStateException("maintenance failed for " + table.name(), e);
         }
+    }
+
+    @Override
+    public void deleteFiles(List<String> paths) {
+        CatalogUtil.deleteFiles(table.io(), paths, "staged file", /*concurrent=*/ false);
     }
 
     @Override

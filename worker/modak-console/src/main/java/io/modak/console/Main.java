@@ -1,6 +1,6 @@
 package io.modak.console;
 
-import io.modak.worker.LoadEndpoint;
+import io.modak.worker.http.LoadEndpoint;
 import io.modak.worker.WorkerConfig;
 import io.modak.worker.WorkerDaemon;
 import java.util.Map;

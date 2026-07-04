@@ -5,10 +5,8 @@ import java.util.Objects;
 import java.util.Properties;
 
 /**
- * How to reach a Modak table: the Postgres holding the heap and the catalog,
- * the schema-qualified table name, and the pin lifetime. {@code lakeTable}
- * overrides where the cold branch loads from when the engine resolves the
- * lake table through its own catalog.
+ * How to reach a Modak table: the Postgres holding the heap and the
+ * catalog, the schema-qualified table name, and the pin lifetime.
  */
 public final class SeamOptions {
 
@@ -116,24 +114,16 @@ public final class SeamOptions {
             return this;
         }
 
-        /**
-         * Two-tier reads on fully mirrored tables: the bulk of the scan moves to
-         * the lake once the mirror frontier provably covers this read. Falls back
-         * to the (always correct) heap when the frontier lags past
-         * {@code mirrorWait}.
-         */
         public Builder hybrid(boolean enabled) {
             this.hybrid = enabled;
             return this;
         }
 
-        /** Tier-key margin kept on the heap side of a hybrid read (default 0). */
         public Builder hybridLag(long lag) {
             this.hybridLag = lag;
             return this;
         }
 
-        /** Bounded wait for the mirror frontier before a hybrid read (default 5s). */
         public Builder mirrorWait(Duration wait) {
             this.mirrorWait = wait;
             return this;

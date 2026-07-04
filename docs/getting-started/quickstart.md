@@ -69,7 +69,7 @@ docker compose run --rm worker register \
     --table public.my_dim --pk id --tier-key updated_at --mode mirrored   # mirrored
 ```
 
-See [Registering tables](../guides/registering-tables.md) for modes, retention,
+See [Registering tables](../tables/registering-tables.md) for modes, retention,
 and composite keys.
 
 ## Teardown
@@ -81,4 +81,4 @@ docker compose down -v    # removes all data
 !!! note
     The compose stack is a test harness, not a production topology. The same
     worker binary points at your managed Postgres and real object store through
-    the same env vars. See [Production deployment](../guides/production.md).
+    the same env vars. See [Production deployment](../operations/production.md).

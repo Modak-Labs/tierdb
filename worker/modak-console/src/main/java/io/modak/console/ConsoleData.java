@@ -32,10 +32,12 @@ final class ConsoleData {
                       FROM (SELECT state, count(*) AS n FROM modak.partitions p
                              WHERE p.table_id = t.table_id GROUP BY state) s),
                    (SELECT count(*) FROM modak.load_labels l
-                     WHERE l.table_id = t.table_id AND l.state = 'staged')
+                     WHERE l.table_id = t.table_id AND l.state = 'staged'),
+                   ls.stats, jsonb_array_length(ls.warnings)
               FROM modak.tables t
               LEFT JOIN modak.cutline c USING (table_id)
               LEFT JOIN modak.copy_progress cp USING (table_id)
+              LEFT JOIN modak.lake_stats ls USING (table_id)
              ORDER BY t.schema_name, t.table_name
             """;
 
@@ -85,6 +87,8 @@ final class ConsoleData {
                             + ",\"estRows\":" + Json.num(longOrNull(rs, 16))
                             + ",\"partitions\":" + Json.raw(rs.getString(17))
                             + ",\"stagedLoads\":" + rs.getLong(18)
+                            + ",\"lake\":" + Json.raw(rs.getString(19))
+                            + ",\"lakeWarnings\":" + Json.num(longOrNull(rs, 20))
                             + "}");
                 }
             }
@@ -112,8 +116,32 @@ final class ConsoleData {
                    t.tier_key_col, t.lake_format, t.lake_table_ref, t.heap_retention_lag,
                    t.publication_name, t.slot_name,
                    extract(epoch FROM t.created_at)::bigint,
-                   t.lake_props ->> 'metadata_location'
-              FROM modak.tables t WHERE t.table_id = ?
+                   c.lake_props ->> 'metadata_location',
+                   mr.requested_by,
+                   extract(epoch FROM mr.requested_at)::bigint,
+                   t.storage_profile
+              FROM modak.tables t
+              LEFT JOIN modak.cutline c USING (table_id)
+              LEFT JOIN modak.maintenance_requests mr USING (table_id)
+             WHERE t.table_id = ?
+            """;
+
+    boolean requestMaintenance(long tableId) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement ps = c.prepareStatement("""
+                        INSERT INTO modak.maintenance_requests (table_id, requested_by)
+                        SELECT table_id, 'console' FROM modak.tables WHERE table_id = ?
+                        ON CONFLICT (table_id) DO UPDATE
+                           SET requested_at = now(), requested_by = EXCLUDED.requested_by
+                        """)) {
+            ps.setLong(1, tableId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    private static final String LAKE = """
+            SELECT stats, warnings, policy, extract(epoch FROM collected_at)::bigint
+              FROM modak.lake_stats WHERE table_id = ?
             """;
 
     private static final String PARTITIONS = """
@@ -126,7 +154,7 @@ final class ConsoleData {
     private static final String OPS = """
             SELECT op_id, op_kind, phase, lake_snapshot_id, details,
                    extract(epoch FROM updated_at)::bigint
-              FROM modak.tiering_log WHERE table_id = ?
+              FROM modak.op_log WHERE table_id = ?
              ORDER BY updated_at DESC LIMIT 50
             """;
 
@@ -155,7 +183,33 @@ final class ConsoleData {
                             .append(",\"publication\":").append(Json.str(rs.getString(9)))
                             .append(",\"slot\":").append(Json.str(rs.getString(10)))
                             .append(",\"createdAt\":").append(Json.num(longOrNull(rs, 11)))
-                            .append(",\"metadataLocation\":").append(Json.str(rs.getString(12)));
+                            .append(",\"metadataLocation\":").append(Json.str(rs.getString(12)))
+                            .append(",\"storageProfile\":").append(Json.str(rs.getString(15)));
+                    String requestedBy = rs.getString(13);
+                    out.append(",\"maintenancePending\":");
+                    if (requestedBy == null) {
+                        out.append("null");
+                    } else {
+                        out.append("{\"requestedBy\":").append(Json.str(requestedBy))
+                                .append(",\"requestedAt\":").append(Json.num(longOrNull(rs, 14)))
+                                .append('}');
+                    }
+                }
+            }
+
+            out.append(",\"lake\":");
+            try (PreparedStatement ps = c.prepareStatement(LAKE)) {
+                ps.setLong(1, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        out.append("{\"stats\":").append(Json.raw(rs.getString(1)))
+                                .append(",\"warnings\":").append(Json.raw(rs.getString(2)))
+                                .append(",\"policy\":").append(Json.raw(rs.getString(3)))
+                                .append(",\"collectedAt\":").append(Json.num(longOrNull(rs, 4)))
+                                .append('}');
+                    } else {
+                        out.append("null");
+                    }
                 }
             }
 
@@ -191,6 +245,53 @@ final class ConsoleData {
             out.append(",\"ops\":").append(ops);
 
             return out.append('}').toString();
+        }
+    }
+
+    private static final String PROFILES = """
+            SELECT p.profile_name, p.lake_format, p.warehouse, p.lake_config::text,
+                   p.credential_ref, p.is_default,
+                   extract(epoch FROM p.created_at)::bigint,
+                   (SELECT count(*) FROM modak.tables t
+                     WHERE t.storage_profile = p.profile_name)
+              FROM modak.storage_profiles p
+             ORDER BY p.is_default DESC, p.profile_name
+            """;
+
+    String storageProfiles() throws Exception {
+        try (Connection c = dataSource.getConnection(); Statement s = c.createStatement();
+                ResultSet rs = s.executeQuery(PROFILES)) {
+            StringJoiner out = new StringJoiner(",", "[", "]");
+            while (rs.next()) {
+                out.add("{\"name\":" + Json.str(rs.getString(1))
+                        + ",\"lakeFormat\":" + Json.str(rs.getString(2))
+                        + ",\"warehouse\":" + Json.str(rs.getString(3))
+                        + ",\"lakeConfig\":" + Json.raw(rs.getString(4))
+                        + ",\"credentialRef\":" + Json.str(rs.getString(5))
+                        + ",\"isDefault\":" + Json.bool(rs.getBoolean(6))
+                        + ",\"createdAt\":" + Json.num(longOrNull(rs, 7))
+                        + ",\"tables\":" + rs.getLong(8) + "}");
+            }
+            return "{\"profiles\":" + out + "}";
+        }
+    }
+
+    void createStorageProfile(String name, String lakeFormat, String warehouse,
+            String lakeConfigJson, String credentialRef, boolean isDefault) throws Exception {
+        try (Connection c = dataSource.getConnection();
+                PreparedStatement ps = c.prepareStatement("""
+                        INSERT INTO modak.storage_profiles
+                            (profile_name, lake_format, warehouse, lake_config,
+                             credential_ref, is_default)
+                        VALUES (?, ?, ?, ?::jsonb, ?, ?)
+                        """)) {
+            ps.setString(1, name);
+            ps.setString(2, lakeFormat);
+            ps.setString(3, warehouse);
+            ps.setString(4, lakeConfigJson);
+            ps.setString(5, credentialRef);
+            ps.setBoolean(6, isDefault);
+            ps.executeUpdate();
         }
     }
 

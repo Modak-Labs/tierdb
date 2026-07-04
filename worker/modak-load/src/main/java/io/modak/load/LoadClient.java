@@ -26,7 +26,6 @@ public final class LoadClient {
     private final LoadOptions options;
     private final Function<String, LakeStorage> lakeByFormat;
 
-    /** No lake storage: cold volume stays in {@code modak.delta} instead of spooling. */
     public LoadClient(LoadOptions options) {
         this(options, format -> null);
     }
@@ -45,7 +44,6 @@ public final class LoadClient {
                 lake != null, options.spoolThreshold());
         List<String> columns = columnsOf(request.rows(), state.tierKeyCol());
 
-        // Parquet lands before the transaction, a crash here leaves orphans no one reads.
         StagedFiles spooled = routed.spools()
                 ? Spooler.spool(lake, state, columns, routed.coldSpool())
                 : null;
@@ -56,7 +54,6 @@ public final class LoadClient {
                 spooled != null ? spooled.files() : List.of(), false);
 
         try (Connection c = SeamClient.connect(options.seam())) {
-            // Physical-tier writes on purpose, the extension must not rewrite them.
             try (var s = c.createStatement()) {
                 s.execute("SET modak.transparent_reads = off");
                 s.execute("SET modak.transparent_writes = off");
@@ -97,7 +94,6 @@ public final class LoadClient {
         if (stored.resultJson() == null) {
             return new LoadResult(label, stored.state(), 0, 0, 0, List.of(), true);
         }
-        // The stored state may have moved (STAGED -> COMMITTED) since recording.
         LoadResult recorded = LoadResult.fromJson(stored.resultJson(), true);
         return new LoadResult(recorded.label(), stored.state(), recorded.hotRows(),
                 recorded.deltaRows(), recorded.spooledRows(), recorded.stagedFiles(), true);

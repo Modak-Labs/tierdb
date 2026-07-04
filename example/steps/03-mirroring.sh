@@ -17,8 +17,6 @@ INSERT INTO public.vehicles VALUES (4, 'VIN-004', 'active', 260);
 UPDATE public.vehicles SET status = 'repair', last_seen = 210 WHERE id = 2;
 DELETE FROM public.vehicles WHERE id = 3;
 SQL
-# Capture the target ONCE: frontier advances themselves write WAL, so a
-# recomputed WAL position would stay forever ahead of the frontier.
 TARGET_LSN=$($PSQL -tA -c "SELECT (pg_current_wal_insert_lsn() - '0/0'::pg_lsn)::bigint")
 wait_for "mirror frontier caught up past the DML (lsn $TARGET_LSN)" \
     "SELECT replicated_lsn >= $TARGET_LSN
@@ -51,5 +49,4 @@ JOIN=$($PSQL -tA -c \
     "SELECT string_agg(e.id::text || '|' || coalesce(e.val,'') || '|' || v.vin, E'\n' ORDER BY e.id)
        FROM public.events e JOIN public.vehicles v ON v.id = e.id")
 echo "$JOIN"
-# events reflects step 6c: id=2 updated to B?, id=4 deleted.
 assert_eq "cross-mode join" "2|B?|VIN-002" "$JOIN"

@@ -55,8 +55,6 @@ class LoadClientTest {
     void reset() {
         exec("TRUNCATE modak.tables CASCADE");
         exec("DROP TABLE IF EXISTS public.events");
-        // Partitioned like a real tiered table: no unique constraint on id,
-        // the primary key is logical (declared at registration).
         exec("CREATE TABLE public.events (id bigint NOT NULL, ts bigint NOT NULL, v text) "
                 + "PARTITION BY RANGE (ts)");
         exec("CREATE TABLE public.events_p0 PARTITION OF public.events "
@@ -68,7 +66,7 @@ class LoadClientTest {
         catalog = new JdbcCatalog(dataSource);
         table = catalog.register(new TableRegistration(
                 42L, "public", "events", List.of("id"), "ts",
-                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events", null));
+                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events"));
         catalog.initCutline(table, new TierKey(100), new LakeSnapshotId(1));
     }
 
@@ -116,7 +114,6 @@ class LoadClientTest {
         LoadClient client = new LoadClient(options(1000));
         LoadResult first = client.load(new LoadRequest("b3", List.of(row(1, 150, "a"))));
 
-        // Same label, different rows: nothing new may land.
         LoadResult second = client.load(new LoadRequest("b3",
                 List.of(row(8, 150, "x"), row(9, 150, "y"))));
 
@@ -175,7 +172,7 @@ class LoadClientTest {
         exec("CREATE TABLE public.vehicles (id bigint PRIMARY KEY, ts bigint NOT NULL, v text)");
         TableId mirrored = catalog.register(new TableRegistration(
                 77L, "public", "vehicles", List.of("id"), "ts",
-                "{}", "iceberg", "warehouse.public.vehicles", null,
+                "{}", "iceberg", "warehouse.public.vehicles",
                 TableMode.MIRRORED, "pub", "slot", Optional.empty(), Optional.empty()));
         catalog.initCutline(mirrored, new TierKey(1000), new LakeSnapshotId(1));
 

@@ -12,7 +12,7 @@ import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
-import io.modak.tiering.LagBasedTieringPolicy;
+import io.modak.tiering.policy.LagBasedTieringPolicy;
 import io.modak.tiering.PartitionSync;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -26,12 +26,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/**
- * The daemon's discovery pieces against a real Postgres: {@link PartitionSync}
- * mirrors declarative partitions into {@code modak.partitions} without touching
- * managed state, and {@link LagBasedTieringPolicy} selects the contiguous run
- * behind the data's own high-water mark.
- */
+/** The daemon's discovery pieces against a real Postgres: {@link PartitionSync} */
 class PartitionLifecycleTest {
 
     private static EmbeddedPostgres postgres;
@@ -57,7 +52,7 @@ class PartitionLifecycleTest {
         catalog = new JdbcCatalog(dataSource);
         table = catalog.register(new TableRegistration(
                 relOid("public.events"), "public", "events", List.of("id"), "event_time",
-                "{\"unit\":\"range\"}", "iceberg", "/wh/events", null));
+                "{\"unit\":\"range\"}", "iceberg", "/wh/events"));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
     }
 
@@ -78,7 +73,6 @@ class PartitionLifecycleTest {
         assertEquals(100, p0.bounds().hi().value());
         assertEquals(PartitionState.HOT, p0.state());
 
-        // A partition the workers already advanced must not be reset by a re-sync.
         catalog.transition(p0.id(), PartitionState.HOT, PartitionState.SEALING);
         exec("CREATE TABLE public.events_p3 PARTITION OF public.events FOR VALUES FROM (300) TO (400)");
         assertEquals(1, sync.sync(catalog.get(table).orElseThrow()));
@@ -101,18 +95,16 @@ class PartitionLifecycleTest {
         exec("CREATE TABLE public.metrics_p2 PARTITION OF public.metrics FOR VALUES FROM (200) TO (300)");
         TableId metrics = catalog.register(new TableRegistration(
                 relOid("public.metrics"), "public", "metrics", List.of("id"), "event_time",
-                "{\"unit\":\"range\"}", "iceberg", "/wh/metrics", null));
+                "{\"unit\":\"range\"}", "iceberg", "/wh/metrics"));
         catalog.initCutline(metrics, new TierKey(0), new LakeSnapshotId(0));
         new PartitionSync(dataSource, catalog).sync(catalog.get(metrics).orElseThrow());
 
         exec("INSERT INTO public.metrics VALUES (1, 10, 'a'), (2, 150, 'b'), (3, 250, 'hot')");
 
-        // high-water = 250, lag 100 => threshold 150: only p0 (hi=100) qualifies.
         assertEquals(List.of(new PartitionId(metrics, "metrics_p0")),
                 new LagBasedTieringPolicy(dataSource, catalog, 100)
                         .selectForTiering(metrics, Instant.now()));
 
-        // lag 0 => threshold 250: p0+p1 qualify as one contiguous run from T=0.
         assertEquals(
                 List.of(new PartitionId(metrics, "metrics_p0"), new PartitionId(metrics, "metrics_p1")),
                 new LagBasedTieringPolicy(dataSource, catalog, 0)

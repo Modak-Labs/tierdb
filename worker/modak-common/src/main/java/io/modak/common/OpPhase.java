@@ -1,7 +1,7 @@
 package io.modak.common;
 
 /**
- * The last phase an op durably reached in {@code modak.tiering_log}. Abandoned
+ * The last phase an op durably reached in {@code modak.op_log}. Abandoned
  * means the worker crashed before the lake commit and the op is safe to redo.
  */
 public enum OpPhase {

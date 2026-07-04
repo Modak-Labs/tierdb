@@ -89,8 +89,6 @@ class ChangeBatchTest {
 
     @Test
     void collapsedMovesKeepTheOriginalLakePartition() {
-        // Two moves before a fold: the delete must still target where the lake
-        // holds the row, not the intermediate tier.
         batch.onUpdate((Update) PgOutputDecoder.decode(PgOutputFixtures.update(
                 OID,
                 new Object[] {"VIN-1", "Model 3", 12000, 1000},
@@ -228,7 +226,6 @@ class ChangeBatchTest {
 
     @Test
     void classifyToleratesTypeChangesWithinTheSameFamily() {
-        // int8 -> int4: both LONG in the portable vocabulary, nothing to evolve.
         assertTrue(batch.classify(relationOf(VIN, MODEL,
                 new PgOutputFixtures.Col("odometer", false, 23), TS)).isEmpty());
     }

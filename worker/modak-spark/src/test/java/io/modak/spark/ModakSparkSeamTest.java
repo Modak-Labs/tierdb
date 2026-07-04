@@ -17,7 +17,7 @@ import io.modak.common.TierKey;
 import io.modak.connector.SeamOptions;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -101,7 +101,7 @@ class ModakSparkSeamTest {
         catalog = new JdbcCatalog(dataSource);
         table = catalog.register(new TableRegistration(
                 relOid("public.events"), "public", "events", List.of("id"), "event_time",
-                "{\"unit\":\"range-100\"}", IcebergLakeStoragePlugin.IDENTIFIER, location, null));
+                "{\"unit\":\"range-100\"}", IcebergLakeStoragePlugin.IDENTIFIER, location));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
         PartitionId p0 = registerPartition("events_p0", 0, 100);
@@ -198,10 +198,9 @@ class ModakSparkSeamTest {
         TableId mirrored = catalog.register(new TableRegistration(
                 relOid("public.readings"), "public", "readings", List.of("id"), "event_time",
                 "{\"unit\":\"range-100\"}", IcebergLakeStoragePlugin.IDENTIFIER,
-                warehouse.resolve("readings_mirror").toString(), null,
+                warehouse.resolve("readings_mirror").toString(),
                 TableMode.MIRRORED, "pub_readings", "slot_readings",
                 Optional.empty(), Optional.empty()));
-        // As the registrar seeds it: T at its minimum, every write is heap.
         catalog.initCutline(mirrored, new TierKey(Long.MIN_VALUE), new LakeSnapshotId(0));
 
         SeamOptions mirroredOptions = SeamOptions.builder()
@@ -249,7 +248,7 @@ class ModakSparkSeamTest {
                 new org.apache.hadoop.conf.Configuration())
                 .load(mirrorLocation).currentSnapshot().snapshotId();
 
-        exec("UPDATE modak.tables SET lake_props = jsonb_build_object('snapshot_id', " + snapshot
+        exec("UPDATE modak.cutline SET lake_props = jsonb_build_object('snapshot_id', " + snapshot
                 + ") WHERE table_id = " + mirrored);
         exec("UPDATE modak.cutline SET replicated_lsn = 9223372036854775807"
                 + " WHERE table_id = " + mirrored);
@@ -290,7 +289,6 @@ class ModakSparkSeamTest {
     void mirroredWritesBelowTheDropBoundaryBecomeDeltaRows() {
         long mirrored = Long.parseLong(queryOne(
                 "SELECT table_id::text FROM modak.tables WHERE table_name = 'readings'"));
-        // Heap retention dropped everything below 1000: T sits at the boundary.
         exec("UPDATE modak.tables SET heap_retention_lag = 500 WHERE table_id = " + mirrored);
         exec("UPDATE modak.cutline SET tier_key_hi = 1000 WHERE table_id = " + mirrored);
 

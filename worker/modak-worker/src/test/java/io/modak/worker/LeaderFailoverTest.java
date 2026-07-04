@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -122,7 +124,6 @@ class LeaderFailoverTest {
 
     @Test
     void slotTakeoverEvictsAZombieHolder() throws Exception {
-        // A dead leader's walsender still holds the slot: the new pump must evict it.
         ReplicationSource zombie = ReplicationSource.open(
                 config.pgUrl(), config.pgUser(), config.pgPassword(),
                 meta.slotName(), meta.publicationName(), Lsn.ZERO);
@@ -141,7 +142,6 @@ class LeaderFailoverTest {
             try {
                 zombie.close();
             } catch (RuntimeException ignored) {
-                // Its backend was terminated by the takeover, which is the point.
             }
         }
     }

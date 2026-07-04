@@ -1,142 +1,155 @@
--- Modak catalog schema, the cross-language contract.
--- These tables are the ONLY coordination channel between the Rust extension
--- and the Java workers, every atomic handoff is a plain Postgres transaction.
--- PORTABILITY: pg_duckdb may push read-path queries down to DuckDB, so every
--- column must stay executor-portable (plain ints/text/jsonb), which is why
--- table_id is bigint (not oid) and delta.pk is text (not bytea).
+-- Modak catalog schema, the cross-language contract between the Rust
+-- extension and the Java workers. Columns stay executor-portable
+-- (ints/text/jsonb) because pg_duckdb may push reads down to DuckDB.
 
 CREATE SCHEMA IF NOT EXISTS modak;
 
+-- Named warehouse bindings, credential_ref points at MODAK_CREDENTIALS_<REF>.
+CREATE TABLE IF NOT EXISTS modak.storage_profiles (
+    profile_name        text        PRIMARY KEY,
+    lake_format         text,
+    warehouse           text        NOT NULL,
+    lake_config         jsonb,
+    credential_ref      text,
+    is_default          boolean     NOT NULL DEFAULT false,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS modak_storage_profiles_default_idx
+    ON modak.storage_profiles (is_default) WHERE is_default;
+INSERT INTO modak.storage_profiles (profile_name, warehouse, is_default)
+SELECT 'default', '', true
+ WHERE NOT EXISTS (SELECT 1 FROM modak.storage_profiles WHERE is_default);
+
 -- Registered logical tables.
--- Writer: Java (admin)   Reader: Rust + Java
 CREATE TABLE IF NOT EXISTS modak.tables (
-    table_id            bigint       PRIMARY KEY,          -- user table's OID
+    table_id            bigint       PRIMARY KEY,
     schema_name         text        NOT NULL,
     table_name          text        NOT NULL,
-    primary_key_cols    text[]      NOT NULL,             -- merge key
-    tier_key_col        text        NOT NULL,             -- the aging key rows tier by
-    partition_scheme    jsonb       NOT NULL,             -- e.g. {"unit":"hour"}
-    lake_format         text        NOT NULL,             -- LakeStoragePlugin id
+    primary_key_cols    text[]      NOT NULL,
+    tier_key_col        text        NOT NULL,
+    partition_scheme    jsonb       NOT NULL,
+    lake_format         text        NOT NULL,
     lake_table_ref      text        NOT NULL,
-    lake_props          jsonb,                            -- opaque per-format config
-    schema_version      int         NOT NULL DEFAULT 1,
-    -- 'tiered': data moves (recent in PG, old in the lake).
-    -- 'mirrored': CDC keeps a full lake copy. PG keeps everything unless
-    -- heap_retention_lag says otherwise.
+    storage_profile     text        NOT NULL DEFAULT 'default'
+                                    REFERENCES modak.storage_profiles(profile_name),
     mode                text        NOT NULL DEFAULT 'tiered'
                                     CHECK (mode IN ('tiered','mirrored')),
-    publication_name    text,                             -- mirrored: logical publication
-    slot_name           text,                             -- mirrored: replication slot
-    heap_retention_lag  bigint,                           -- mirrored: drop heap partitions
-                                                          -- this far behind highwater, NULL = keep all
-    lake_retention_lag  bigint,                           -- tiered: expire lake rows this far
-                                                          -- behind the cut-line, NULL = keep forever
+    publication_name    text,
+    slot_name           text,
+    heap_retention_lag  bigint,
+    lake_retention_lag  bigint,
+    keep_heap           boolean     NOT NULL DEFAULT false,
+    maintenance_policy  jsonb,
     created_at          timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (schema_name, table_name)
+    UNIQUE (schema_name, table_name),
+    CHECK (mode = 'mirrored'
+           OR (publication_name IS NULL AND slot_name IS NULL AND heap_retention_lag IS NULL)),
+    CHECK (mode = 'tiered' OR (lake_retention_lag IS NULL AND NOT keep_heap)),
+    CHECK (NOT keep_heap OR lake_retention_lag IS NULL)
 );
 
 -- The cut-line: per table, current T + pinned S, always advanced together.
--- Writer: Java             Reader: Rust
 CREATE TABLE IF NOT EXISTS modak.cutline (
     table_id            bigint       PRIMARY KEY REFERENCES modak.tables(table_id) ON DELETE CASCADE,
-    tier_key_hi         bigint      NOT NULL,             -- T: rows with tier_key >= T live in Postgres
-    lake_snapshot_id    bigint      NOT NULL,             -- S: pinned cold-store version consistent with T
-    replicated_lsn      bigint,                           -- F: mirror frontier (WAL pos as bigint),
-                                                          -- NULL for tiered tables
-    retention_line      bigint,                           -- R: lake rows with tier_key < R are
-                                                          -- expired, NULL = nothing expired yet
+    tier_key_hi         bigint      NOT NULL,
+    lake_snapshot_id    bigint      NOT NULL,
+    replicated_lsn      bigint,
+    retention_line      bigint,
+    lake_props          jsonb,
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
 
 -- Partition lifecycle map.
--- Writer: Java             Reader: Rust + Java
 CREATE TABLE IF NOT EXISTS modak.partitions (
     table_id            bigint       NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
     partition_id        text        NOT NULL,
-    tier_key_lo         bigint      NOT NULL,             -- [lo, hi) tier-key bounds
+    tier_key_lo         bigint      NOT NULL,
     tier_key_hi         bigint      NOT NULL,
     state               text        NOT NULL
                                     CHECK (state IN ('hot','sealing','tiering','tiered','dropped')),
-    lake_files          jsonb,                            -- opaque data/manifest refs
     updated_at          timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (table_id, partition_id)
 );
 
 -- Cold overlay: correction/late-write buffer for cold rows, merged on read.
--- Writer: Rust/PG         Reader: Rust + Java
 CREATE TABLE IF NOT EXISTS modak.delta (
     table_id            bigint       NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
-    pk                  text        NOT NULL,             -- canonical PK: single col = raw ::text,
-                                                          -- composite = parts (\ and 0x1F escaped
-                                                          -- with \) joined on chr(31)
-    op                  smallint    NOT NULL,             -- 0 = upsert, 1 = tombstone
-    tier_key            bigint      NOT NULL,             -- of the target cold row (< T)
-    old_tier_key        bigint,                           -- where the lake still holds the row
-                                                          -- when a SET moved it across tiers,
-                                                          -- the fold deletes there instead
-    version             bigint      NOT NULL,             -- newest-wins ordering
-    payload             jsonb,                            -- row image, tombstones keep the pk fields
+    pk                  text        NOT NULL,
+    op                  smallint    NOT NULL,
+    tier_key            bigint      NOT NULL,
+    old_tier_key        bigint,
+    version             bigint      NOT NULL,
+    payload             jsonb,
     updated_at          timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (table_id, pk)
 );
 CREATE INDEX IF NOT EXISTS modak_delta_tier_key_idx ON modak.delta (table_id, tier_key);
 
--- Assignment-ordered versions for delta entries (newest-wins merge + fold clear guard).
 CREATE SEQUENCE IF NOT EXISTS modak.delta_version;
 
 -- Active read pins. The oldest pin is the reclaim horizon.
--- Writer: Rust             Reader: Java
 CREATE TABLE IF NOT EXISTS modak.read_pins (
     pin_id                  bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     table_id                bigint       NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
     pinned_lake_snapshot_id bigint      NOT NULL,
     pinned_tier_key_hi      bigint      NOT NULL,
     started_at              timestamptz NOT NULL DEFAULT now(),
-    expires_at              timestamptz NOT NULL          -- bounds a stuck query
+    expires_at              timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS modak_read_pins_horizon_idx ON modak.read_pins (table_id, pinned_lake_snapshot_id);
 
--- Idempotency + crash-resume log for tiering and compaction operations.
--- Writer: Java             Reader: Java
-CREATE TABLE IF NOT EXISTS modak.tiering_log (
+-- Idempotency + crash-resume journal for every lake-writing operation.
+CREATE TABLE IF NOT EXISTS modak.op_log (
     op_id               uuid        PRIMARY KEY,
     table_id            bigint       NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
     op_kind             text        NOT NULL CHECK (op_kind IN ('tiering','compaction','maintenance','retention','ingest','load')),
-    phase               text        NOT NULL,             -- flushing | committed | advanced | abandoned
+    phase               text        NOT NULL,
     lake_snapshot_id    bigint,
     details             jsonb,
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS modak_op_log_table_idx ON modak.op_log (table_id, updated_at);
 
--- Stream Load label ledger: a label commits with its batch's data, replays
--- return the recorded result, 'staged' rows await lake adoption.
--- Writer: Java             Reader: Java
+-- Stream Load label ledger.
 CREATE TABLE IF NOT EXISTS modak.load_labels (
     table_id            bigint      NOT NULL REFERENCES modak.tables(table_id) ON DELETE CASCADE,
     label               text        NOT NULL,
     state               text        NOT NULL
                                     CHECK (state IN ('staged','committed','failed')),
-    staged_files        jsonb,                            -- paths awaiting adoption, NULL otherwise
-    result              jsonb,                            -- recorded LoadResult for replays
+    staged_files        jsonb,
+    result              jsonb,
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (table_id, label)
 );
 CREATE INDEX IF NOT EXISTS modak_load_labels_state_idx ON modak.load_labels (table_id, state);
 
--- In-flight initial copies (mirrored registration). The row exists only while
--- the chunked copy runs, a re-run of register resumes from last_pk.
--- Writer: Java (admin)     Reader: Java
+-- In-flight initial copies (mirrored registration), resumable from last_pk.
 CREATE TABLE IF NOT EXISTS modak.copy_progress (
     table_id            bigint       PRIMARY KEY REFERENCES modak.tables(table_id) ON DELETE CASCADE,
-    consistent_point    bigint      NOT NULL,             -- slot LSN streaming starts from
-    last_pk             jsonb,                            -- pk of the last copied row (PG text forms)
+    consistent_point    bigint      NOT NULL,
+    last_pk             jsonb,
     chunks_done         bigint      NOT NULL DEFAULT 0,
     updated_at          timestamptz NOT NULL DEFAULT now()
 );
 
+-- Lake health per table, counters and warnings are owned by the format plugin.
+CREATE TABLE IF NOT EXISTS modak.lake_stats (
+    table_id            bigint      PRIMARY KEY REFERENCES modak.tables(table_id) ON DELETE CASCADE,
+    stats               jsonb       NOT NULL,
+    warnings            jsonb       NOT NULL DEFAULT '[]'::jsonb,
+    policy              jsonb,
+    collected_at        timestamptz NOT NULL DEFAULT now()
+);
+
+-- Pending out-of-schedule maintenance triggers, claimed with DELETE RETURNING.
+CREATE TABLE IF NOT EXISTS modak.maintenance_requests (
+    table_id            bigint      PRIMARY KEY REFERENCES modak.tables(table_id) ON DELETE CASCADE,
+    requested_at        timestamptz NOT NULL DEFAULT now(),
+    requested_by        text        NOT NULL
+);
+
 -- One-row-per-table operational snapshot for humans and dashboards.
--- DROP + CREATE (not OR REPLACE): re-applies cleanly when columns change.
 DROP VIEW IF EXISTS modak.status;
 CREATE VIEW modak.status AS
 SELECT t.table_id,
@@ -165,7 +178,6 @@ SELECT t.table_id,
   FROM modak.tables t
   LEFT JOIN modak.cutline c USING (table_id);
 
--- Version stamp, this file is always the latest schema.
 CREATE TABLE IF NOT EXISTS modak.schema_meta (
     version             int         NOT NULL,
     applied_at          timestamptz NOT NULL DEFAULT now()

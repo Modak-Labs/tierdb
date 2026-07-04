@@ -1,7 +1,7 @@
 package io.modak.lake.iceberg;
 
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.LakeCommitResult;
+import io.modak.lake.commit.LakeCommitResult;
 import io.modak.lake.TierKeyWindow;
 import java.io.IOException;
 import java.io.UncheckedIOException;

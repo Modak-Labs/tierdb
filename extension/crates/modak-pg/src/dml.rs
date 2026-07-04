@@ -64,8 +64,6 @@ pub(crate) unsafe fn init() {
 
 #[pg_guard]
 unsafe extern "C-unwind" fn executor_start(query_desc: *mut pg_sys::QueryDesc, eflags: c_int) {
-    // pg_duckdb worker threads re-enter here. pgrx forbids pg_sys calls off
-    // the main thread, so forward untouched.
     if !crate::threads::is_main_thread() {
         match PREV_EXECUTOR_START {
             Some(prev) => prev(query_desc, eflags),
@@ -100,9 +98,6 @@ unsafe extern "C-unwind" fn executor_start(query_desc: *mut pg_sys::QueryDesc, e
     }
 }
 
-/// The command tag and SPI_processed read `es_processed` right after
-/// ExecutorRun returns, so cold rows fold in here, not at ExecutorEnd.
-/// Stashed RETURNING rows go to the still-open destination here too.
 #[pg_guard]
 unsafe extern "C-unwind" fn executor_run(
     query_desc: *mut pg_sys::QueryDesc,
@@ -149,8 +144,6 @@ unsafe extern "C-unwind" fn executor_run(
     }
 }
 
-/// Sends cold rows' RETURNING outputs to the statement's destination. Values
-/// arrive as text and re-enter through each output column's input function.
 unsafe fn inject_returning(query_desc: *mut pg_sys::QueryDesc, rows: Vec<Vec<Option<String>>>) {
     let tupdesc = (*query_desc).tupDesc;
     let dest = (*query_desc).dest;
@@ -209,8 +202,6 @@ unsafe extern "C-unwind" fn executor_end(query_desc: *mut pg_sys::QueryDesc) {
         return;
     }
     WRITE_FRAMES.with_borrow_mut(|frames| {
-        // Frames above the match belong to errored executors that never
-        // reached their End, so they go too.
         if let Some(i) = frames
             .iter()
             .rposition(|f| f.query_desc == query_desc as usize)
@@ -237,8 +228,6 @@ unsafe extern "C-unwind" fn xact_callback(event: pg_sys::XactEvent::Type, _arg: 
     }
 }
 
-/// The spill trigger's target. Below the cut-line the row becomes a delta
-/// upsert. At or above it the heap is missing a partition and that stays an error.
 #[pg_extern]
 fn modak_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
     let t = TableId(table.into());
@@ -252,6 +241,13 @@ fn modak_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
              (cut-line is {}); the premake worker is behind or the range was \
              never created",
             meta.schema, meta.table, cut.t.0
+        );
+    }
+    if meta.keep_heap {
+        error!(
+            "modak: no heap partition of {}.{} covers tier_key {tier_key} and \
+             the table keeps its heap, create the partition first",
+            meta.schema, meta.table
         );
     }
     if !TRANSPARENT_WRITES.get() {
@@ -296,9 +292,6 @@ fn modak_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
     });
 }
 
-/// The tier-key pass-through in a rewritten UPDATE/DELETE's delta CTE. Guards
-/// the retention floor, tallies the row for the command tag, and stashes the
-/// row's RETURNING outputs for the executor to inject.
 #[pg_extern]
 fn modak_cold_dml(
     tier_key: i64,
@@ -324,8 +317,6 @@ fn modak_cold_dml(
     tier_key
 }
 
-// The trigger body is plpgsql because to_jsonb(NEW) is the exact row
-// encoding every other write path already speaks.
 extension_sql!(
     r#"
 CREATE SCHEMA IF NOT EXISTS modak;
@@ -347,9 +338,7 @@ fn spill_name(table: &str) -> String {
     format!("{table}{SPILL_SUFFIX}")
 }
 
-// This function performs DDL, so its lookups must see the transaction's
-// latest state rather than the calling statement's snapshot.
-fn fresh_lookup<T: FromDatum + IntoDatum>(
+pub(crate) fn fresh_lookup<T: FromDatum + IntoDatum>(
     sql: &str,
     args: &[pgrx::datum::DatumWithOid],
 ) -> Option<T> {
@@ -366,9 +355,6 @@ fn fresh_lookup<T: FromDatum + IntoDatum>(
     })
 }
 
-/// Attaches the spill, a DEFAULT partition plus its routing trigger.
-/// Idempotent. Refuses fully mirrored tables, where a row without a
-/// partition is a real error.
 #[pg_extern]
 fn modak_enable_transparent_writes(table: pg_sys::Oid) -> String {
     let t = TableId(table.into());
@@ -421,8 +407,6 @@ fn modak_enable_transparent_writes(table: pg_sys::Oid) -> String {
     format!("{qualified}: transparent writes enabled")
 }
 
-/// Drops the spill partition (and with it the trigger). The spill is always
-/// empty, so this never destroys data.
 #[pg_extern]
 fn modak_disable_transparent_writes(table: pg_sys::Oid) -> String {
     let t = TableId(table.into());

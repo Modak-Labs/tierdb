@@ -1,14 +1,11 @@
 #!/bin/bash
-# Registers the warehouse S3 credentials as a pg_duckdb secret so iceberg_scan()
-# can read s3:// locations. Endpoint is host:port (no scheme), e.g. minio:9000.
+# DuckDB secrets for the read path: MODAK_S3_* makes the default unscoped
+# secret; each MODAK_READ_SECRET_<NAME> (';'-separated key=value pairs passed
+# through to duckdb.create_simple_secret) makes a scoped one per profile.
 set -euo pipefail
 
-if [ -z "${MODAK_S3_ENDPOINT:-}" ]; then
-    echo "MODAK_S3_ENDPOINT not set; skipping DuckDB S3 secret"
-    exit 0
-fi
-
-psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<EOSQL
+if [ -n "${MODAK_S3_ENDPOINT:-}" ]; then
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<EOSQL
 SELECT duckdb.create_simple_secret(
     type      := 'S3',
     key_id    := '${MODAK_S3_ACCESS_KEY:-minioadmin}',
@@ -19,3 +16,22 @@ SELECT duckdb.create_simple_secret(
     use_ssl   := '${MODAK_S3_USE_SSL:-false}'
 );
 EOSQL
+else
+    echo "MODAK_S3_ENDPOINT not set; skipping the default DuckDB secret"
+fi
+
+for var in $(compgen -e | grep '^MODAK_READ_SECRET_' || true); do
+    args=""
+    IFS=';' read -ra pairs <<< "${!var}"
+    for pair in "${pairs[@]}"; do
+        [ -z "$pair" ] && continue
+        key="${pair%%=*}"
+        val="${pair#*=}"
+        args+="${args:+, }${key} := '${val//\'/\'\'}'"
+    done
+    if [ -n "$args" ]; then
+        echo "creating scoped DuckDB secret from ${var}"
+        psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+            -c "SELECT duckdb.create_simple_secret(${args});"
+    fi
+done

@@ -10,7 +10,6 @@ public record TierKeyWindow(long minInclusive, long maxExclusive) {
         return key >= minInclusive && key < maxExclusive;
     }
 
-    /** True when the closed range {@code [lo, hi]} lies entirely inside the window. */
     public boolean containsRange(long lo, long hi) {
         return lo >= minInclusive && hi < maxExclusive;
     }

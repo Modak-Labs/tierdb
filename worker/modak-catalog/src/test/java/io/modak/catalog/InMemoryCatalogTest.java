@@ -27,7 +27,7 @@ class InMemoryCatalogTest {
         return new TableRegistration(
                 42L, "public", "events",
                 List.of("id"), "event_time",
-                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events", null);
+                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events");
     }
 
     private record TestBatch(TableId table, int size, List<DeltaBatch.Key> keys)
@@ -119,7 +119,6 @@ class InMemoryCatalogTest {
         assertEquals(new LakeSnapshotId(7), catalog.readCutline(table).snapshot());
         assertEquals(new TierKey(1000), catalog.readCutline(table).t());
 
-        // A concurrent commit already moved S past ours: no regression.
         catalog.finishLoad(table, List.of(), new LakeSnapshotId(3), Map.of());
         assertEquals(new LakeSnapshotId(7), catalog.readCutline(table).snapshot());
     }

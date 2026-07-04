@@ -23,7 +23,10 @@ public record WorkerConfig(
         int mirrorBatchRows,
         long mirrorFlushMillis,
         long campaignIntervalSeconds,
+        boolean maintenanceEnabled,
         long maintenanceIntervalSeconds,
+        String maintenanceEngine,
+        long lakeStatsIntervalSeconds,
         long rewriteTargetBytes,
         int rewriteMinInputFiles,
         long snapshotRetentionHours,
@@ -41,6 +44,10 @@ public record WorkerConfig(
         Map<String, String> merged = new HashMap<>(lakeConfig);
         merged.putIfAbsent("warehouse", warehouse);
         lakeConfig = Map.copyOf(merged);
+        if (!"embedded".equals(maintenanceEngine)) {
+            throw new IllegalArgumentException("unknown MODAK_MAINTENANCE_ENGINE '"
+                    + maintenanceEngine + "', 'embedded' is the only engine so far");
+        }
     }
 
     public static Builder builder() {
@@ -61,7 +68,10 @@ public record WorkerConfig(
         private int mirrorBatchRows = 500;
         private long mirrorFlushMillis = 2000;
         private long campaignIntervalSeconds = 5;
+        private boolean maintenanceEnabled = true;
         private long maintenanceIntervalSeconds = 3600;
+        private String maintenanceEngine = "embedded";
+        private long lakeStatsIntervalSeconds = 60;
         private long rewriteTargetBytes = 128L * 1024 * 1024;
         private int rewriteMinInputFiles = 8;
         private long snapshotRetentionHours = 24;
@@ -87,7 +97,10 @@ public record WorkerConfig(
         public Builder mirrorBatchRows(int v) { mirrorBatchRows = v; return this; }
         public Builder mirrorFlushMillis(long v) { mirrorFlushMillis = v; return this; }
         public Builder campaignIntervalSeconds(long v) { campaignIntervalSeconds = v; return this; }
+        public Builder maintenanceEnabled(boolean v) { maintenanceEnabled = v; return this; }
         public Builder maintenanceIntervalSeconds(long v) { maintenanceIntervalSeconds = v; return this; }
+        public Builder maintenanceEngine(String v) { maintenanceEngine = v; return this; }
+        public Builder lakeStatsIntervalSeconds(long v) { lakeStatsIntervalSeconds = v; return this; }
         public Builder rewriteTargetBytes(long v) { rewriteTargetBytes = v; return this; }
         public Builder rewriteMinInputFiles(int v) { rewriteMinInputFiles = v; return this; }
         public Builder snapshotRetentionHours(long v) { snapshotRetentionHours = v; return this; }
@@ -105,7 +118,8 @@ public record WorkerConfig(
             return new WorkerConfig(pgUrl, pgUser, pgPassword, warehouse, lakeConfig,
                     cycleIntervalSeconds, tieringLag, reclaimLag, compactionBatchSize,
                     mirrorBatchRows, mirrorFlushMillis, campaignIntervalSeconds,
-                    maintenanceIntervalSeconds, rewriteTargetBytes, rewriteMinInputFiles,
+                    maintenanceEnabled, maintenanceIntervalSeconds, maintenanceEngine,
+                    lakeStatsIntervalSeconds, rewriteTargetBytes, rewriteMinInputFiles,
                     snapshotRetentionHours, snapshotMinRetained, slotWarnBytes, metricsPort,
                     mirrorMaxBufferedRows, deltaBacklogWarnRows, consoleSql, premakePartitions,
                     loadToken, loadSpoolThreshold);
@@ -141,7 +155,10 @@ public record WorkerConfig(
         ifSetInt(env, "MODAK_MIRROR_BATCH", b::mirrorBatchRows);
         ifSetLong(env, "MODAK_MIRROR_FLUSH_MILLIS", b::mirrorFlushMillis);
         ifSetLong(env, "MODAK_CAMPAIGN_INTERVAL_SECONDS", b::campaignIntervalSeconds);
+        ifSet(env, "MODAK_MAINTENANCE_ENABLED", v -> b.maintenanceEnabled(Boolean.parseBoolean(v)));
         ifSetLong(env, "MODAK_MAINTENANCE_INTERVAL_SECONDS", b::maintenanceIntervalSeconds);
+        ifSet(env, "MODAK_MAINTENANCE_ENGINE", b::maintenanceEngine);
+        ifSetLong(env, "MODAK_LAKE_STATS_INTERVAL_SECONDS", b::lakeStatsIntervalSeconds);
         ifSetLong(env, "MODAK_REWRITE_TARGET_BYTES", b::rewriteTargetBytes);
         ifSetInt(env, "MODAK_REWRITE_MIN_INPUT_FILES", b::rewriteMinInputFiles);
         ifSetLong(env, "MODAK_SNAPSHOT_RETENTION_HOURS", b::snapshotRetentionHours);
@@ -156,12 +173,12 @@ public record WorkerConfig(
         return b.build();
     }
 
-    /** Same config with the worker's own metrics endpoint moved/disabled. */
     public WorkerConfig withMetricsPort(int port) {
         return new WorkerConfig(pgUrl, pgUser, pgPassword, warehouse, lakeConfig,
                 cycleIntervalSeconds, tieringLag, reclaimLag, compactionBatchSize,
                 mirrorBatchRows, mirrorFlushMillis, campaignIntervalSeconds,
-                maintenanceIntervalSeconds, rewriteTargetBytes, rewriteMinInputFiles,
+                maintenanceEnabled, maintenanceIntervalSeconds, maintenanceEngine,
+                lakeStatsIntervalSeconds, rewriteTargetBytes, rewriteMinInputFiles,
                 snapshotRetentionHours, snapshotMinRetained, slotWarnBytes, port,
                 mirrorMaxBufferedRows, deltaBacklogWarnRows, consoleSql, premakePartitions,
                 loadToken, loadSpoolThreshold);
@@ -193,8 +210,7 @@ public record WorkerConfig(
         return lakeConfig.getOrDefault("format", "iceberg");
     }
 
-    /** Parses {@code MODAK_LAKE_PROPS}: semicolon-separated {@code key=value} pairs. */
-    static Map<String, String> parseLakeProps(String props) {
+    public static Map<String, String> parseLakeProps(String props) {
         Map<String, String> out = new HashMap<>();
         if (props == null || props.isBlank()) {
             return out;
@@ -206,16 +222,20 @@ public record WorkerConfig(
             int eq = pair.indexOf('=');
             if (eq <= 0) {
                 throw new IllegalArgumentException(
-                        "MODAK_LAKE_PROPS entries must be key=value: '" + pair + "'");
+                        "lake config entries must be key=value: '" + pair + "'");
             }
             out.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
         }
         return out;
     }
 
-    public io.modak.lake.MaintenanceConfig maintenanceConfig() {
-        return new io.modak.lake.MaintenanceConfig(rewriteTargetBytes, rewriteMinInputFiles,
-                snapshotRetentionHours * 3_600_000L, snapshotMinRetained);
+    public Map<String, String> defaultMaintenanceSettings() {
+        return Map.of(
+                "maintenance_enabled", String.valueOf(maintenanceEnabled),
+                "rewrite_target_bytes", String.valueOf(rewriteTargetBytes),
+                "rewrite_min_input_files", String.valueOf(rewriteMinInputFiles),
+                "snapshot_retention_hours", String.valueOf(snapshotRetentionHours),
+                "snapshot_min_retained", String.valueOf(snapshotMinRetained));
     }
 
     public DataSource dataSource() {
@@ -223,12 +243,10 @@ public record WorkerConfig(
         ds.setUrl(pgUrl);
         ds.setUser(pgUser);
         ds.setPassword(pgPassword);
-        // Workers reason about the physical heap, transparent reads must not widen their queries.
         ds.setOptions("-c modak.transparent_reads=off");
         return ds;
     }
 
-    /** Console playground connections: transparent reads stay ON, as a user sees them. */
     public DataSource consoleDataSource() {
         PGSimpleDataSource ds = new PGSimpleDataSource();
         ds.setUrl(pgUrl);

@@ -1,7 +1,4 @@
 //! The read protocol as an explicit SQL surface:
-//! `modak_read_begin` pins `(T, S)`, `modak_rewrite_scan` returns the unified
-//! SELECT, `modak_read_end` releases the pin. All three run inside one
-//! transaction so the cut-line, delta, and pin are one consistent MVCC picture.
 
 use modak_core::domain::TableId;
 use modak_core::ports::{CutlineReader, DeltaReader, ReadPinRepository};
@@ -12,9 +9,10 @@ use pgrx::prelude::*;
 use crate::catalog::{catalog_err, PgCatalog};
 use crate::pin::PgReadPins;
 
-const META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col, \
-            lake_props ->> 'metadata_location' AS metadata_location \
-     FROM modak.tables WHERE table_id = $1";
+const META_SQL: &str = "SELECT t.schema_name, t.table_name, t.primary_key_cols, t.tier_key_col, \
+            c.lake_props ->> 'metadata_location' AS metadata_location \
+     FROM modak.tables t LEFT JOIN modak.cutline c USING (table_id) \
+     WHERE t.table_id = $1";
 
 const COLUMNS_SQL: &str = "SELECT a.attname::text AS name, \
             format_type(a.atttypid, a.atttypmod) AS sql_type \
@@ -57,12 +55,11 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
     let metadata_location = metadata_location.ok_or_else(|| {
         ModakError::Planning(
             "cold tier has no committed lake snapshot yet \
-             (modak.tables.lake_props->>'metadata_location' is NULL)"
+             (modak.cutline.lake_props->>'metadata_location' is NULL)"
                 .into(),
         )
     })?;
 
-    // pg_attribute genuinely keys by oid, only the modak.* contract avoids it.
     let columns = Spi::connect(|client| {
         let rows = client
             .select(COLUMNS_SQL, None, &[pg_sys::Oid::from(table.0).into()])

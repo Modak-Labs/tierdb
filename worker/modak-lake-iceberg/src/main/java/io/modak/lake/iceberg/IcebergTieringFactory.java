@@ -1,10 +1,10 @@
 package io.modak.lake.iceberg;
 
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitter;
-import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.LakeWriter;
-import io.modak.lake.WriterInitContext;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitter;
+import io.modak.lake.commit.LakeTieringFactory;
+import io.modak.lake.commit.LakeWriter;
+import io.modak.lake.commit.WriterInitContext;
 import java.io.IOException;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;

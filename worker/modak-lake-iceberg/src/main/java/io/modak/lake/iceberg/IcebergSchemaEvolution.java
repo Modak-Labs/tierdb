@@ -20,7 +20,6 @@ final class IcebergSchemaEvolution {
         this.table = table;
     }
 
-    /** Returns true when the schema moved (the table has been refreshed). */
     boolean addMissing(List<Column> columns) {
         UpdateSchema update = table.updateSchema();
         boolean any = false;

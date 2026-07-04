@@ -60,9 +60,9 @@ class JdbcCatalogTest {
         table = catalog.register(new TableRegistration(
                 42L, "public", "events",
                 List.of("id"), "event_time",
-                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events",
-                "{\"catalog\":\"rest\"}"));
-        catalog.initCutline(table, new TierKey(1000), new LakeSnapshotId(1));
+                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events"));
+        catalog.initCutline(table, new TierKey(1000), new LakeSnapshotId(1),
+                "{\"catalog\":\"rest\"}");
     }
 
     private record TestBatch(TableId table, int size, List<DeltaBatch.Key> keys)
@@ -95,7 +95,7 @@ class JdbcCatalogTest {
     void mirroredRegistrationRoundTripsModePublicationSlotAndRetention() {
         TableId mirrored = catalog.register(new TableRegistration(
                 77L, "public", "vehicles", List.of("vin"), "updated_at",
-                "{}", "iceberg", "warehouse.public.vehicles", null,
+                "{}", "iceberg", "warehouse.public.vehicles",
                 TableMode.MIRRORED, "modak_pub_vehicles", "modak_slot_vehicles",
                 java.util.Optional.of(3_600_000_000L), java.util.Optional.empty()));
 
@@ -108,13 +108,38 @@ class JdbcCatalogTest {
     }
 
     @Test
+    void keepHeapRegistrationRoundTripsAndNeverDropsPartitions() {
+        TableId kh = catalog.register(new TableRegistration(
+                88L, "public", "sensor_readings", List.of("id"), "reading_time",
+                "{}", "iceberg", "warehouse.public.sensor_readings",
+                TableMode.TIERED, null, null,
+                java.util.Optional.empty(), java.util.Optional.empty(), true));
+
+        RegisteredTable t = catalog.get(kh).orElseThrow();
+        assertTrue(t.keepHeap());
+        assertFalse(t.dropsHeapPartitions());
+        assertFalse(catalog.get(table).orElseThrow().keepHeap(), "default is false");
+    }
+
+    @Test
+    void keepHeapIsTieredOnlyAndExcludesLakeRetention() {
+        assertThrows(IllegalArgumentException.class, () -> new TableRegistration(
+                89L, "public", "x", List.of("id"), "ts", "{}", "iceberg", "w.x",
+                TableMode.MIRRORED, "pub", "slot",
+                java.util.Optional.empty(), java.util.Optional.empty(), true));
+        assertThrows(IllegalArgumentException.class, () -> new TableRegistration(
+                90L, "public", "y", List.of("id"), "ts", "{}", "iceberg", "w.y",
+                TableMode.TIERED, null, null,
+                java.util.Optional.empty(), java.util.Optional.of(100L), true));
+    }
+
+    @Test
     void mirrorFrontierSeedsFromNullThenAdvancesMonotonically() {
-        // The copy seeds a null frontier, every commit after moves (LSN, S) together.
         catalog.advanceMirrorFrontier(table, new Lsn(100), new LakeSnapshotId(2),
                 java.util.Map.of("metadata_location", "/wh/events/metadata/00002-m.metadata.json"));
         assertEquals(new Lsn(100), catalog.readMirrorFrontier(table).orElseThrow());
         assertEquals(new LakeSnapshotId(2), catalog.readCutline(table).snapshot());
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("00002-m.metadata.json"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("00002-m.metadata.json"));
 
         assertThrows(CatalogException.class,
                 () -> catalog.advanceMirrorFrontier(table, new Lsn(50), new LakeSnapshotId(3),
@@ -123,7 +148,7 @@ class JdbcCatalogTest {
                 () -> catalog.advanceMirrorFrontier(table, new Lsn(200), new LakeSnapshotId(1),
                         java.util.Map.of()));
         assertEquals(new Lsn(100), catalog.readMirrorFrontier(table).orElseThrow());
-        assertFalse(catalog.get(table).orElseThrow().lakeProps().contains("should-not-appear"));
+        assertFalse(catalog.readLakeProps(table).orElseThrow().contains("should-not-appear"));
     }
 
     @Test
@@ -135,7 +160,7 @@ class JdbcCatalogTest {
     void duplicateRegistrationRejectedByUniqueConstraint() {
         assertThrows(CatalogException.class, () -> catalog.register(new TableRegistration(
                 99L, "public", "events", List.of("id"), "event_time",
-                "{}", "iceberg", "warehouse.public.events", null)));
+                "{}", "iceberg", "warehouse.public.events")));
     }
 
     @Test
@@ -156,7 +181,6 @@ class JdbcCatalogTest {
                 + "(" + table.oid() + ", '7', 0, 500, 3, '{\"id\":7}'), "
                 + "(" + table.oid() + ", '8', 1, 600, 9, NULL)");
 
-        // pk=8 was re-corrected after the fold (version 9 > folded 4): it must survive.
         catalog.publishCompaction(table, new LakeSnapshotId(9),
                 new TestBatch(table, 2, List.of(new DeltaBatch.Key("7", 3), new DeltaBatch.Key("8", 4))),
                 java.util.Map.of("metadata_location", "/wh/events/metadata/00005-c.metadata.json"));
@@ -164,7 +188,7 @@ class JdbcCatalogTest {
         Cutline c = catalog.readCutline(table);
         assertEquals(new TierKey(1000), c.t());
         assertEquals(new LakeSnapshotId(9), c.snapshot());
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("00005-c.metadata.json"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("00005-c.metadata.json"));
 
         try (Connection conn = dataSource.getConnection(); Statement s = conn.createStatement()) {
             var rs = s.executeQuery("SELECT pk FROM modak.delta ORDER BY pk");
@@ -214,14 +238,14 @@ class JdbcCatalogTest {
                 java.util.Map.of("metadata_location", "/wh/events/metadata/00003-x.metadata.json"));
 
         assertEquals(new Cutline(new TierKey(2000), new LakeSnapshotId(5)), catalog.readCutline(table));
-        String props = catalog.get(table).orElseThrow().lakeProps();
+        String props = catalog.readLakeProps(table).orElseThrow();
         assertTrue(props.contains("00003-x.metadata.json"), props);
         assertTrue(props.contains("\"catalog\""), "pre-existing keys survive the merge: " + props);
 
         assertThrows(CatalogException.class,
                 () -> catalog.advanceCutline(table, new TierKey(1000), new LakeSnapshotId(9),
                         java.util.Map.of("metadata_location", "/wh/should-not-appear.json")));
-        assertFalse(catalog.get(table).orElseThrow().lakeProps().contains("should-not-appear"));
+        assertFalse(catalog.readLakeProps(table).orElseThrow().contains("should-not-appear"));
     }
 
     @Test
@@ -280,7 +304,7 @@ class JdbcCatalogTest {
 
         assertEquals(new TierKey(500), catalog.readRetentionLine(table).orElseThrow());
         assertEquals(new LakeSnapshotId(6), catalog.readCutline(table).snapshot());
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("00006-r.metadata.json"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("00006-r.metadata.json"));
         assertEquals(1, catalog.listPartitions(table).size(), "p0 below R is gone");
         try (Connection conn = dataSource.getConnection(); Statement s = conn.createStatement()) {
             var rs = s.executeQuery("SELECT pk FROM modak.delta ORDER BY pk");
@@ -291,7 +315,6 @@ class JdbcCatalogTest {
             throw new RuntimeException(e);
         }
 
-        // Without a lake commit the line still moves, S stays.
         catalog.publishRetention(table, null, new TierKey(900), java.util.Map.of());
         assertEquals(new TierKey(900), catalog.readRetentionLine(table).orElseThrow());
         assertEquals(new LakeSnapshotId(6), catalog.readCutline(table).snapshot());
@@ -334,7 +357,7 @@ class JdbcCatalogTest {
                 catalog.lookupLoad(table, "older").orElseThrow().state());
         assertEquals(new LakeSnapshotId(7), catalog.readCutline(table).snapshot());
         assertEquals(new TierKey(1000), catalog.readCutline(table).t(), "T is untouched");
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("00007-l.metadata.json"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("00007-l.metadata.json"));
     }
 
     @Test
@@ -342,7 +365,6 @@ class JdbcCatalogTest {
         catalog.advanceCutline(table, new TierKey(1000), new LakeSnapshotId(10));
         catalog.beginLoad(table, "late", LoadState.STAGED, "[]", null);
 
-        // A concurrent commit already moved S past ours: labels still flip.
         catalog.finishLoad(table, List.of("late"), new LakeSnapshotId(5), java.util.Map.of());
 
         assertEquals(new LakeSnapshotId(10), catalog.readCutline(table).snapshot());
@@ -361,6 +383,17 @@ class JdbcCatalogTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Test
+    void maintenanceRequestUpsertsOnceAndIsClaimedByExactlyOneConsumer() {
+        assertFalse(catalog.consumeMaintenanceRequest(table), "nothing pending yet");
+
+        catalog.requestMaintenance(table, "cli");
+        catalog.requestMaintenance(table, "console");
+
+        assertTrue(catalog.consumeMaintenanceRequest(table), "first claim wins");
+        assertFalse(catalog.consumeMaintenanceRequest(table), "the request is consumed");
     }
 
     @Test

@@ -4,18 +4,18 @@ import io.modak.common.LakeSnapshotId;
 import io.modak.common.PartitionData;
 import io.modak.common.RowBatchData;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.CommittedLakeSnapshot;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitResult;
-import io.modak.lake.LakeCommitter;
+import io.modak.lake.commit.CommittedLakeSnapshot;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitResult;
+import io.modak.lake.commit.LakeCommitter;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTable;
-import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.LakeTieringProps;
-import io.modak.lake.LakeWriter;
-import io.modak.lake.MergeWriter;
-import io.modak.lake.WriterInitContext;
+import io.modak.lake.commit.LakeTieringFactory;
+import io.modak.lake.commit.LakeTieringProps;
+import io.modak.lake.commit.LakeWriter;
+import io.modak.lake.commit.MergeWriter;
+import io.modak.lake.commit.WriterInitContext;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,7 +39,6 @@ final class FakeLake implements LakeStorage {
     int writersCreated;
     int abortedCommittables;
 
-    /** Simulates a snapshot the catalog doesn't know about (e.g. a foreign committer). */
     void seedSnapshot(Map<String, String> props, List<Object[]> rows) {
         snapshots.add(new CommittedSnapshot(nextSnapshotId++, Map.copyOf(props), rows));
     }
@@ -108,20 +107,19 @@ final class FakeLake implements LakeStorage {
         }
 
         @Override
-        public io.modak.lake.MaintenanceResult maintain(io.modak.lake.MaintenanceConfig config,
-                io.modak.common.LakeSnapshotId oldestPinnedSnapshot,
+        public io.modak.lake.maintain.MaintenanceResult maintain(io.modak.lake.maintain.MaintenancePlan plan,
                 java.util.Map<String, String> snapshotProps) {
-            return io.modak.lake.MaintenanceResult.NOOP;
+            return io.modak.lake.maintain.MaintenanceResult.NOOP;
         }
 
         @Override
-        public io.modak.lake.LakeCommitResult expireBelow(long boundary,
+        public io.modak.lake.commit.LakeCommitResult expireBelow(long boundary,
                 java.util.Map<String, String> snapshotProps) {
             return null;
         }
 
         @Override
-        public io.modak.lake.LakeCommitResult ingest(List<String> files,
+        public io.modak.lake.commit.LakeCommitResult ingest(List<String> files,
                 io.modak.lake.TierKeyWindow window,
                 java.util.Map<String, String> snapshotProps) {
             throw new UnsupportedOperationException("not needed for tiering tests");

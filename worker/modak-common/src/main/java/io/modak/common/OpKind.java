@@ -2,7 +2,7 @@ package io.modak.common;
 
 /**
  * Every kind of lake operation Modak runs. One value drives both the
- * {@code modak.tiering_log} journal and the snapshot stamps.
+ * {@code modak.op_log} journal and the snapshot stamps.
  */
 public enum OpKind {
     TIERING("tiering"),
@@ -23,7 +23,6 @@ public enum OpKind {
         return sql;
     }
 
-    /** The {@code commit-user} snapshot stamp maintenance tools filter on. */
     public String commitUser() {
         return "__modak_" + sql;
     }

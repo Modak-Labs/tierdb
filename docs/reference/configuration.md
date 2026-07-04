@@ -14,6 +14,11 @@ The same binary points at any deployment shape.
 | `MODAK_S3_ACCESS_KEY` / `MODAK_S3_SECRET_KEY` | unset | S3 credentials (unset on AWS = default chain) |
 | `MODAK_S3_REGION` | empty | S3 region |
 | `MODAK_S3_SSL` | `false` | TLS to the S3 endpoint |
+| `MODAK_CREDENTIALS_<REF>` | unset | Named credential set for storage profiles: `key=value` pairs, `;`-separated, merged into the lake config of any profile created with `--credentials <ref>`. See [Storage profiles](../tables/storage-profiles.md) |
+
+The `MODAK_WAREHOUSE`/`MODAK_S3_*` settings define the default warehouse.
+Deployments with more than one warehouse layer
+[storage profiles](../tables/storage-profiles.md) on top.
 
 ## Worker behaviour
 
@@ -33,9 +38,16 @@ The same binary points at any deployment shape.
 
 ## Lake maintenance
 
+These are the worker-wide defaults. Any of the equivalent settings can be
+overridden per table with `modak-worker policy`, see
+[Lake maintenance](../operations/lake-maintenance.md).
+
 | Env var | Default | Meaning |
 |---------|---------|---------|
+| `MODAK_MAINTENANCE_ENABLED` | `true` | Fleet-wide default for the maintenance pass. Tables can re-enable or disable via policy |
 | `MODAK_MAINTENANCE_INTERVAL_SECONDS` | `3600` | How often each table gets a maintenance pass |
+| `MODAK_MAINTENANCE_ENGINE` | `embedded` | What executes maintenance plans. `embedded` runs in the worker, external engines are the extension point |
+| `MODAK_LAKE_STATS_INTERVAL_SECONDS` | `60` | How often each table's lake health snapshot is refreshed |
 | `MODAK_REWRITE_TARGET_BYTES` | `134217728` (128 MiB) | Data files smaller than this are bin-pack candidates |
 | `MODAK_REWRITE_MIN_INPUT_FILES` | `8` | Small files that must accumulate before a rewrite runs |
 | `MODAK_SNAPSHOT_RETENTION_HOURS` | `24` | Snapshots older than this are expirable |
@@ -48,7 +60,7 @@ The same binary points at any deployment shape.
 | `MODAK_METRICS_PORT` | unset | Headless worker: Prometheus `/metrics` port. Unset = no endpoint |
 | `MODAK_CONSOLE_PORT` | `9090` | Console binary: the web console port (includes `/metrics`) |
 | `MODAK_CONSOLE_SQL` | `true` | SQL playground. `false` disables the query endpoint |
-| `MODAK_LOAD_TOKEN` | unset | Enables `POST /api/load` (see [Stream load](../guides/stream-load.md)). Unset = no endpoint |
+| `MODAK_LOAD_TOKEN` | unset | Enables `POST /api/load` (see [Stream load](../ingestion/stream-load.md)). Unset = no endpoint |
 | `MODAK_LOAD_SPOOL_THRESHOLD` | `1000` | Cold rows per batch above which a load spools Parquet instead of the delta |
 
 ## Iceberg catalog

@@ -31,6 +31,7 @@ public final class InMemoryCatalog implements Catalog {
     private final Map<TableId, RegisteredTable> tables = new ConcurrentHashMap<>();
     private final Map<String, TableId> byName = new ConcurrentHashMap<>();
     private final Map<TableId, Cutline> cutlines = new ConcurrentHashMap<>();
+    private final Map<TableId, String> lakeProps = new ConcurrentHashMap<>();
     private final Map<TableId, TierKey> retentionLines = new ConcurrentHashMap<>();
     private final Map<TableId, Lsn> frontiers = new ConcurrentHashMap<>();
     private final Map<PartitionId, PartitionInfo> partitions = new ConcurrentHashMap<>();
@@ -39,6 +40,10 @@ public final class InMemoryCatalog implements Catalog {
     private final List<UUID> opOrder = new ArrayList<>();
     private final Map<String, LoadLabel> loadLabels = new ConcurrentHashMap<>();
     private final List<String> loadOrder = new ArrayList<>();
+    private final java.util.Set<TableId> maintenanceRequests = ConcurrentHashMap.newKeySet();
+    private final Map<String, StorageProfile> profiles = new ConcurrentHashMap<>(Map.of(
+            TableRegistration.DEFAULT_PROFILE,
+            new StorageProfile(TableRegistration.DEFAULT_PROFILE, null, "", null, null, true)));
     private final AtomicLong pinSeq = new AtomicLong();
     private final List<DeltaBatch.Key> clearedDeltaKeys = new ArrayList<>();
 
@@ -55,11 +60,42 @@ public final class InMemoryCatalog implements Catalog {
         TableId id = new TableId(r.oid());
         tables.put(id, new RegisteredTable(
                 id, r.schemaName(), r.tableName(), r.primaryKeyCols(), r.tierKeyCol(),
-                r.partitionScheme(), r.lakeFormat(), r.lakeTableRef(), r.lakeProps(), 1,
+                r.partitionScheme(), r.lakeFormat(), r.lakeTableRef(), r.storageProfile(),
                 r.mode(), r.publicationName(), r.slotName(), r.heapRetentionLag(),
-                r.lakeRetentionLag()));
+                r.lakeRetentionLag(), r.keepHeap(), MaintenancePolicy.NONE));
         byName.put(key, id);
         return id;
+    }
+
+    @Override
+    public List<StorageProfile> listStorageProfiles() {
+        List<StorageProfile> out = new ArrayList<>(profiles.values());
+        out.sort((a, b) -> a.isDefault() != b.isDefault()
+                ? Boolean.compare(b.isDefault(), a.isDefault())
+                : a.name().compareTo(b.name()));
+        return out;
+    }
+
+    @Override
+    public Optional<StorageProfile> storageProfile(String name) {
+        return Optional.ofNullable(profiles.get(name));
+    }
+
+    @Override
+    public StorageProfile defaultStorageProfile() {
+        return profiles.values().stream().filter(StorageProfile::isDefault).findFirst()
+                .orElseThrow(() -> new CatalogException("no default storage profile"));
+    }
+
+    @Override
+    public synchronized void createStorageProfile(StorageProfile profile) {
+        if (profiles.containsKey(profile.name())) {
+            throw new CatalogException("storage profile already exists: " + profile.name());
+        }
+        if (profile.isDefault() && profiles.values().stream().anyMatch(StorageProfile::isDefault)) {
+            throw new CatalogException("a default storage profile already exists");
+        }
+        profiles.put(profile.name(), profile);
     }
 
     @Override
@@ -70,6 +106,7 @@ public final class InMemoryCatalog implements Catalog {
         }
         byName.remove(nameKey(removed.schemaName(), removed.tableName()));
         cutlines.remove(table);
+        lakeProps.remove(table);
         retentionLines.remove(table);
         frontiers.remove(table);
         partitions.keySet().removeIf(p -> p.table().equals(table));
@@ -77,6 +114,17 @@ public final class InMemoryCatalog implements Catalog {
         loadLabels.values().removeIf(l -> l.table().equals(table));
         loadOrder.removeIf(k -> !loadLabels.containsKey(k));
         return true;
+    }
+
+    @Override
+    public void requestMaintenance(TableId table, String requestedBy) {
+        requireTable(table);
+        maintenanceRequests.add(table);
+    }
+
+    @Override
+    public boolean consumeMaintenanceRequest(TableId table) {
+        return maintenanceRequests.remove(table);
     }
 
     @Override
@@ -96,9 +144,31 @@ public final class InMemoryCatalog implements Catalog {
     }
 
     @Override
-    public void initCutline(TableId table, TierKey t, LakeSnapshotId snapshot) {
+    public synchronized void setMaintenancePolicy(TableId table, MaintenancePolicy policy) {
+        RegisteredTable cur = tables.get(table);
+        if (cur == null) {
+            throw new CatalogException("unknown table: " + table);
+        }
+        tables.put(table, new RegisteredTable(
+                cur.id(), cur.schemaName(), cur.tableName(), cur.primaryKeyCols(),
+                cur.tierKeyCol(), cur.partitionScheme(), cur.lakeFormat(), cur.lakeTableRef(),
+                cur.storageProfile(), cur.mode(), cur.publicationName(), cur.slotName(),
+                cur.heapRetentionLag(), cur.lakeRetentionLag(), cur.keepHeap(), policy));
+    }
+
+    @Override
+    public void initCutline(TableId table, TierKey t, LakeSnapshotId snapshot,
+            String lakePropsJson) {
         requireTable(table);
         cutlines.put(table, new Cutline(t, snapshot));
+        if (lakePropsJson != null) {
+            lakeProps.put(table, lakePropsJson);
+        }
+    }
+
+    @Override
+    public Optional<String> readLakeProps(TableId table) {
+        return Optional.ofNullable(lakeProps.get(table));
     }
 
     @Override
@@ -161,13 +231,7 @@ public final class InMemoryCatalog implements Catalog {
         if (lakePropsPatch.isEmpty()) {
             return;
         }
-        RegisteredTable cur = tables.get(table);
-        tables.put(table, new RegisteredTable(
-                cur.id(), cur.schemaName(), cur.tableName(), cur.primaryKeyCols(),
-                cur.tierKeyCol(), cur.partitionScheme(), cur.lakeFormat(), cur.lakeTableRef(),
-                JdbcCatalog.jsonObject(lakePropsPatch), cur.schemaVersion(),
-                cur.mode(), cur.publicationName(), cur.slotName(), cur.heapRetentionLag(),
-                cur.lakeRetentionLag()));
+        lakeProps.put(table, JdbcCatalog.jsonObject(lakePropsPatch));
     }
 
     @Override
@@ -360,7 +424,6 @@ public final class InMemoryCatalog implements Catalog {
         pins.remove(pinId);
     }
 
-    /** Keys handed to {@link #publishCompaction}, for asserting what was cleared. */
     public List<DeltaBatch.Key> clearedDeltaKeys() {
         return List.copyOf(clearedDeltaKeys);
     }

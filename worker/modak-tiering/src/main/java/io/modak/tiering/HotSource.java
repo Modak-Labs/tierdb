@@ -12,9 +12,9 @@ import io.modak.common.PartitionId;
  */
 public interface HotSource {
 
-    /** Read all rows of one hot partition (its tier-key range is sealed, so this is stable). */
     PartitionData read(RegisteredTable table, PartitionInfo partition);
 
-    /** Physically drop the partition. Idempotent: a missing partition is a no-op. */
     void dropPartition(RegisteredTable table, PartitionId partition);
+
+    default void attachColdMirror(RegisteredTable table, PartitionId partition) {}
 }

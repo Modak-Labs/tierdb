@@ -19,8 +19,6 @@ import org.apache.spark.sql.functions;
  * Routed deletes: keys at or above the cut-line delete from the heap, keys
  * below it become {@code op = 1} tombstones for the worker to fold into the
  * lake, and keys below the retention line are rejected (expired from the lake).
- * The dataset carries the pk columns plus the tier-key column, explicit because
- * a cold target has no heap row to look it up from.
  */
 final class SeamDeleter {
 
@@ -46,7 +44,6 @@ final class SeamDeleter {
         hot.foreachPartition(new HotDelete(options.jdbcUrl(), options.jdbcProperties(),
                 options.schemaName(), options.tableName(), pkCols));
 
-        // Tombstone payloads keep the key fields: the equality delete needs typed values.
         Column[] pkFields = pkCols.stream().map(cold::col).toArray(Column[]::new);
         Dataset<Row> encoded = cold.select(
                 PkColumns.expression(pkCols, cold).as("pk"),

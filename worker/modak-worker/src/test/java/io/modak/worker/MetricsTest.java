@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.http.Metrics;
+import io.modak.worker.http.MetricsServer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 

@@ -22,6 +22,7 @@ final class FakeHotSource implements HotSource {
 
     final Map<PartitionId, List<Object[]>> rowsByPartition = new HashMap<>();
     final List<PartitionId> dropped = new ArrayList<>();
+    final List<PartitionId> mirrored = new ArrayList<>();
     boolean failOnDrop;
 
     void seed(PartitionId partition, Object[]... rows) {
@@ -32,6 +33,13 @@ final class FakeHotSource implements HotSource {
     public PartitionData read(RegisteredTable table, PartitionInfo partition) {
         return new RowBatchData(partition.id(), partition.bounds(), COLUMNS,
                 rowsByPartition.getOrDefault(partition.id(), List.of()));
+    }
+
+    @Override
+    public void attachColdMirror(RegisteredTable table, PartitionId partition) {
+        if (!mirrored.contains(partition)) {
+            mirrored.add(partition);
+        }
     }
 
     @Override

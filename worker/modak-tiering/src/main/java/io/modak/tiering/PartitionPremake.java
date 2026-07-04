@@ -12,10 +12,8 @@ import java.util.regex.Matcher;
 import javax.sql.DataSource;
 
 /**
- * Creates future heap partitions ahead of the write frontier so inserts never
- * land without one. Unit-agnostic: the width comes from the topmost existing
- * range partition, and at least {@code headroom} empty widths are kept between
- * the hot high-water and the top bound.
+ * Creates future heap partitions ahead of the write frontier so inserts
+ * never land without one.
  */
 public final class PartitionPremake {
 
@@ -40,7 +38,6 @@ public final class PartitionPremake {
         this.headroom = headroom;
     }
 
-    /** Empty when the table has no range partitions (nothing to extend). */
     public Optional<Result> premake(RegisteredTable table) {
         if (headroom <= 0) {
             return Optional.of(new Result(0, false));

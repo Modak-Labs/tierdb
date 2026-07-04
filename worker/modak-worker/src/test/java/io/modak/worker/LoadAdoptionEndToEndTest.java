@@ -1,6 +1,8 @@
 package io.modak.worker;
 
 import io.modak.common.OpPhase;
+import io.modak.worker.ops.LoadAdoptionWorker;
+import io.modak.worker.ops.RetentionWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,7 +90,6 @@ class LoadAdoptionEndToEndTest {
 
     @BeforeEach
     void freshTable() {
-        // A fresh heap + lake table per test keeps snapshot counting exact.
         tableSeq++;
         String name = "events_" + tableSeq;
         exec("CREATE TABLE public." + name
@@ -102,7 +103,7 @@ class LoadAdoptionEndToEndTest {
         table = catalog.register(new TableRegistration(
                 1000L + tableSeq, "public", name, List.of("id"), "event_time",
                 "{\"unit\":\"range\",\"partition_width\":100}",
-                IcebergLakeStoragePlugin.IDENTIFIER, location, null,
+                IcebergLakeStoragePlugin.IDENTIFIER, location,
                 TableMode.TIERED, null, null, Optional.empty(), Optional.empty()));
         catalog.initCutline(table, new TierKey(200), new LakeSnapshotId(0));
     }
@@ -160,14 +161,12 @@ class LoadAdoptionEndToEndTest {
         client(1).load(new LoadRequest("crash-load",
                 List.of(row(7, 30, "x"), row(8, 40, "y"))));
 
-        // First adoption: commit lands, then the "crash": rewind the catalog
-        // to the pre-publish state (label staged, S behind, op at 'committed').
         RegisteredTable meta = catalog.get(table).orElseThrow();
         new LoadAdoptionWorker(catalog, lake).runCycle(meta);
         long committedS = catalog.readCutline(table).snapshot().id();
         exec("UPDATE modak.cutline SET lake_snapshot_id = 0 WHERE table_id = " + table.oid());
         exec("UPDATE modak.load_labels SET state = 'staged' WHERE table_id = " + table.oid());
-        exec("UPDATE modak.tiering_log SET phase = 'committed' "
+        exec("UPDATE modak.op_log SET phase = 'committed' "
                 + "WHERE table_id = " + table.oid() + " AND op_kind = 'load'");
         long snapshotsBefore = snapshotCount();
 
@@ -186,9 +185,7 @@ class LoadAdoptionEndToEndTest {
         client(1).load(new LoadRequest("retry-load",
                 List.of(row(9, 50, "z1"), row(10, 60, "z2"))));
 
-        // A crash before the lake commit: the op journal says flushing, the
-        // label is still staged, and the files are still there.
-        exec("INSERT INTO modak.tiering_log (op_id, table_id, op_kind, phase, details) VALUES "
+        exec("INSERT INTO modak.op_log (op_id, table_id, op_kind, phase, details) VALUES "
                 + "(gen_random_uuid(), " + table.oid()
                 + ", 'load', 'flushing', '{\"labels\":[\"retry-load\"],\"files\":1}')");
 
@@ -206,8 +203,6 @@ class LoadAdoptionEndToEndTest {
         catalog.beginLoad(table, "pinned-low", LoadState.STAGED,
                 "{\"files\":[\"/nowhere/a.parquet\"],\"lo\":30,\"hi\":40}", null);
 
-        // heapFrontier is MAX (no partitions), lag 0 puts the raw boundary at
-        // T=200, the staged load at lo=30 must cap it at 0 (floor to width 100).
         exec("UPDATE modak.tables SET lake_retention_lag = 0 WHERE table_id = " + table.oid());
         new RetentionWorker(catalog, lake).runCycle(catalog.get(table).orElseThrow());
 
@@ -239,7 +234,7 @@ class LoadAdoptionEndToEndTest {
     }
 
     private long countOps(String kind, OpPhase phase) {
-        return Long.parseLong(queryOne("SELECT count(*)::text FROM modak.tiering_log "
+        return Long.parseLong(queryOne("SELECT count(*)::text FROM modak.op_log "
                 + "WHERE table_id = " + table.oid() + " AND op_kind = '" + kind
                 + "' AND phase = '" + phase.sql() + "'"));
     }

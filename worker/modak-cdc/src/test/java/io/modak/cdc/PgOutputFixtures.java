@@ -38,7 +38,6 @@ final class PgOutputFixtures {
         return f.buffer();
     }
 
-    /** Tuple cells: a String writes 't', null writes 'n', {@link #UNCHANGED} writes 'u'. */
     static final Object UNCHANGED = new Object();
 
     static ByteBuffer insert(int oid, Object... cells) {

@@ -11,10 +11,9 @@ use pgrx::prelude::*;
 use crate::catalog::{catalog_err, PgCatalog};
 use crate::delta::{
     check_retention, delete_key_values, ident, or_error, pk_values, tier_key_of, write_meta,
-    TOMBSTONE_DELTA_SQL, UPSERT_DELTA_SQL,
+    WriteMeta, TOMBSTONE_DELTA_SQL, UPSERT_DELTA_SQL,
 };
 
-/// Routes one full row image. Returns which tier took it: `hot` or `delta`.
 #[pg_extern]
 fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
     let t = TableId(table.into());
@@ -22,7 +21,21 @@ fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
     let cut = or_error(PgCatalog.current(t));
 
     let tier_key = or_error(tier_key_of(&row, &meta.tier_key_col));
-    let pk = encode_pk(&or_error(pk_values(&row, &meta.pk_cols)));
+    let pk_vals = or_error(pk_values(&row, &meta.pk_cols));
+    let pk = encode_pk(&pk_vals);
+
+    if meta.keep_heap {
+        heap_delete_by_pk(&meta, &pk_vals, None);
+        let sql = format!(
+            "INSERT INTO {}.{} SELECT * FROM jsonb_populate_record(NULL::{}.{}, $1)",
+            ident(&meta.schema),
+            ident(&meta.table),
+            ident(&meta.schema),
+            ident(&meta.table),
+        );
+        or_error(Spi::run_with_args(&sql, &[row.into()]).map_err(catalog_err));
+        return "hot".to_string();
+    }
 
     match route(TierKey(tier_key), &cut) {
         RouteTarget::Hot => {
@@ -50,9 +63,6 @@ fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
     }
 }
 
-/// Routes a delete. The key is a json object of the pk fields, with a bare
-/// scalar accepted for single-column keys. The tier-key is explicit because a
-/// cold target has no heap row to look it up from. Returns `hot` or `delta`.
 #[pg_extern]
 fn modak_delete(table: pg_sys::Oid, key: pgrx::JsonB, tier_key: i64) -> String {
     let t = TableId(table.into());
@@ -61,27 +71,14 @@ fn modak_delete(table: pg_sys::Oid, key: pgrx::JsonB, tier_key: i64) -> String {
 
     let (values, key_payload) = or_error(delete_key_values(&key, &meta.pk_cols));
 
+    if meta.keep_heap {
+        heap_delete_by_pk(&meta, &values, None);
+        return "hot".to_string();
+    }
+
     match route(TierKey(tier_key), &cut) {
         RouteTarget::Hot => {
-            let conditions = meta
-                .pk_cols
-                .iter()
-                .enumerate()
-                .map(|(i, c)| format!("{}::text = ${}", ident(c), i + 1))
-                .collect::<Vec<_>>()
-                .join(" AND ");
-            // The tier bound scopes the statement to the hot tier, so the
-            // transparent-DML rewrite proves it hot and leaves it alone.
-            let sql = format!(
-                "DELETE FROM {}.{} WHERE {conditions} AND {} >= {}",
-                ident(&meta.schema),
-                ident(&meta.table),
-                ident(&meta.tier_key_col),
-                cut.t.0,
-            );
-            let args: Vec<pgrx::datum::DatumWithOid> =
-                values.into_iter().map(|v| v.into()).collect();
-            or_error(Spi::run_with_args(&sql, &args).map_err(catalog_err));
+            heap_delete_by_pk(&meta, &values, Some(cut.t.0));
             "hot".to_string()
         }
         RouteTarget::Delta => {
@@ -102,4 +99,25 @@ fn modak_delete(table: pg_sys::Oid, key: pgrx::JsonB, tier_key: i64) -> String {
             "delta".to_string()
         }
     }
+}
+
+fn heap_delete_by_pk(meta: &WriteMeta, values: &[String], tier_floor: Option<i64>) {
+    let conditions = meta
+        .pk_cols
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{}::text = ${}", ident(c), i + 1))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let bound = tier_floor
+        .map(|t| format!(" AND {} >= {}", ident(&meta.tier_key_col), t))
+        .unwrap_or_default();
+    let sql = format!(
+        "DELETE FROM {}.{} WHERE {conditions}{bound}",
+        ident(&meta.schema),
+        ident(&meta.table),
+    );
+    let args: Vec<pgrx::datum::DatumWithOid> =
+        values.iter().map(|v| v.clone().into()).collect();
+    or_error(Spi::run_with_args(&sql, &args).map_err(catalog_err));
 }

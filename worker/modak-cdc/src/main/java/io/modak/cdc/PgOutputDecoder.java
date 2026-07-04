@@ -42,7 +42,7 @@ public final class PgOutputDecoder {
     }
 
     private static Commit commit(ByteBuffer buf) {
-        buf.get(); // flags, unused (currently always 0)
+        buf.get();
         return new Commit(new Lsn(buf.getLong()), new Lsn(buf.getLong()), buf.getLong());
     }
 
@@ -97,7 +97,7 @@ public final class PgOutputDecoder {
 
     private static Truncate truncate(ByteBuffer buf) {
         int nrels = buf.getInt();
-        buf.get(); // option bits (CASCADE / RESTART IDENTITY), unused
+        buf.get();
         List<Integer> oids = new ArrayList<>(nrels);
         for (int i = 0; i < nrels; i++) {
             oids.add(buf.getInt());
@@ -119,7 +119,6 @@ public final class PgOutputDecoder {
                     buf.get(bytes);
                     cells.add(Cell.of(new String(bytes, StandardCharsets.UTF_8)));
                 }
-                // 'b' (binary) never appears: we do not request binary mode.
                 default -> throw new CdcException("unsupported tuple cell kind: '" + kind + "'");
             }
         }
@@ -134,7 +133,7 @@ public final class PgOutputDecoder {
         byte[] bytes = new byte[len];
         buf.position(start);
         buf.get(bytes);
-        buf.get(); // consume the NUL
+        buf.get();
         return new String(bytes, StandardCharsets.UTF_8);
     }
 }

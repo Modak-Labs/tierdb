@@ -23,12 +23,7 @@ import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 
-/**
- * Authoritative {@link Catalog} over the {@code modak.*} tables in Postgres.
- * Consistency is enforced in SQL: {@code advanceCutline} is a single guarded,
- * monotonic {@code UPDATE}, and {@code transition} guards the {@code from} state
- * in its {@code WHERE} clause so a stale transition updates zero rows.
- */
+/** Authoritative {@link Catalog} over the {@code modak.*} tables in Postgres. */
 public final class JdbcCatalog implements Catalog {
 
     private final Db db;
@@ -40,9 +35,10 @@ public final class JdbcCatalog implements Catalog {
     private static final String INSERT_TABLE = """
             INSERT INTO modak.tables
                 (table_id, schema_name, table_name, primary_key_cols, tier_key_col,
-                 partition_scheme, lake_format, lake_table_ref, lake_props,
-                 mode, publication_name, slot_name, heap_retention_lag, lake_retention_lag)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
+                 partition_scheme, lake_format, lake_table_ref, storage_profile,
+                 mode, publication_name, slot_name, heap_retention_lag, lake_retention_lag,
+                 keep_heap)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     @Override
@@ -57,14 +53,71 @@ public final class JdbcCatalog implements Catalog {
             ps.setString(6, r.partitionScheme());
             ps.setString(7, r.lakeFormat());
             ps.setString(8, r.lakeTableRef());
-            setNullableString(ps, 9, r.lakeProps());
+            ps.setString(9, r.storageProfile());
             ps.setString(10, r.mode().sql());
             setNullableString(ps, 11, r.publicationName());
             setNullableString(ps, 12, r.slotName());
             setNullableLong(ps, 13, r.heapRetentionLag());
             setNullableLong(ps, 14, r.lakeRetentionLag());
+            ps.setBoolean(15, r.keepHeap());
         });
         return new TableId(r.oid());
+    }
+
+    private static final String PROFILE_COLS =
+            "profile_name, lake_format, warehouse, lake_config::text, credential_ref, is_default";
+
+    @Override
+    public List<StorageProfile> listStorageProfiles() {
+        return db.queryList(
+                "SELECT " + PROFILE_COLS + " FROM modak.storage_profiles "
+                        + "ORDER BY is_default DESC, profile_name",
+                Db.NO_ARGS,
+                JdbcCatalog::mapProfile);
+    }
+
+    @Override
+    public Optional<StorageProfile> storageProfile(String name) {
+        return db.queryOne(
+                "SELECT " + PROFILE_COLS + " FROM modak.storage_profiles WHERE profile_name = ?",
+                ps -> ps.setString(1, name),
+                JdbcCatalog::mapProfile);
+    }
+
+    @Override
+    public StorageProfile defaultStorageProfile() {
+        return db.queryOne(
+                "SELECT " + PROFILE_COLS + " FROM modak.storage_profiles WHERE is_default",
+                Db.NO_ARGS,
+                JdbcCatalog::mapProfile)
+                .orElseThrow(() -> new CatalogException(
+                        "no default storage profile (catalog.sql seeds one, was it applied?)"));
+    }
+
+    @Override
+    public void createStorageProfile(StorageProfile p) {
+        db.update("""
+                INSERT INTO modak.storage_profiles
+                    (profile_name, lake_format, warehouse, lake_config, credential_ref, is_default)
+                VALUES (?, ?, ?, ?::jsonb, ?, ?)
+                """, ps -> {
+            ps.setString(1, p.name());
+            setNullableString(ps, 2, p.lakeFormat());
+            ps.setString(3, p.warehouse());
+            setNullableString(ps, 4, p.lakeConfigJson());
+            setNullableString(ps, 5, p.credentialRef());
+            ps.setBoolean(6, p.isDefault());
+        });
+    }
+
+    private static StorageProfile mapProfile(ResultSet rs) throws SQLException {
+        return new StorageProfile(
+                rs.getString(1),
+                rs.getString(2),
+                rs.getString(3),
+                rs.getString(4),
+                rs.getString(5),
+                rs.getBoolean(6));
     }
 
     @Override
@@ -102,13 +155,51 @@ public final class JdbcCatalog implements Catalog {
     }
 
     @Override
-    public void initCutline(TableId table, TierKey t, LakeSnapshotId snapshot) {
+    public void setMaintenancePolicy(TableId table, MaintenancePolicy policy) {
+        int updated = db.update(
+                "UPDATE modak.tables SET maintenance_policy = ?::jsonb WHERE table_id = ?",
+                ps -> {
+                    setNullableString(ps, 1, policy.toJson());
+                    ps.setLong(2, table.oid());
+                });
+        if (updated == 0) {
+            throw new CatalogException("setMaintenancePolicy found no table " + table);
+        }
+    }
+
+    private static final String REQUEST_MAINTENANCE = """
+            INSERT INTO modak.maintenance_requests (table_id, requested_by)
+            VALUES (?, ?)
+            ON CONFLICT (table_id) DO UPDATE
+               SET requested_at = now(), requested_by = EXCLUDED.requested_by
+            """;
+
+    @Override
+    public void requestMaintenance(TableId table, String requestedBy) {
+        db.update(REQUEST_MAINTENANCE, ps -> {
+            ps.setLong(1, table.oid());
+            ps.setString(2, requestedBy);
+        });
+    }
+
+    @Override
+    public boolean consumeMaintenanceRequest(TableId table) {
+        return db.update(
+                "DELETE FROM modak.maintenance_requests WHERE table_id = ?",
+                ps -> ps.setLong(1, table.oid())) > 0;
+    }
+
+    @Override
+    public void initCutline(TableId table, TierKey t, LakeSnapshotId snapshot,
+            String lakePropsJson) {
         db.update(
-                "INSERT INTO modak.cutline (table_id, tier_key_hi, lake_snapshot_id) VALUES (?, ?, ?)",
+                "INSERT INTO modak.cutline (table_id, tier_key_hi, lake_snapshot_id, lake_props) "
+                        + "VALUES (?, ?, ?, ?::jsonb)",
                 ps -> {
                     ps.setLong(1, table.oid());
                     ps.setLong(2, t.value());
                     ps.setLong(3, snapshot.id());
+                    setNullableString(ps, 4, lakePropsJson);
                 });
     }
 
@@ -119,6 +210,14 @@ public final class JdbcCatalog implements Catalog {
                 ps -> ps.setLong(1, table.oid()),
                 rs -> new Cutline(new TierKey(rs.getLong(1)), new LakeSnapshotId(rs.getLong(2))))
                 .orElseThrow(() -> new CatalogException("no cut-line for table " + table));
+    }
+
+    @Override
+    public Optional<String> readLakeProps(TableId table) {
+        return db.queryOne(
+                "SELECT lake_props::text FROM modak.cutline WHERE table_id = ?",
+                ps -> ps.setLong(1, table.oid()),
+                rs -> rs.getString(1));
     }
 
     private static final String ADVANCE_CUTLINE = """
@@ -143,7 +242,7 @@ public final class JdbcCatalog implements Catalog {
     }
 
     private static final String PATCH_LAKE_PROPS = """
-            UPDATE modak.tables
+            UPDATE modak.cutline
                SET lake_props = coalesce(lake_props, '{}'::jsonb) || ?::jsonb
              WHERE table_id = ?
             """;
@@ -151,7 +250,6 @@ public final class JdbcCatalog implements Catalog {
     @Override
     public void advanceCutline(TableId table, TierKey newT, LakeSnapshotId snapshot,
             Map<String, String> lakePropsPatch) {
-        // Cut-line and lake_props must move in one transaction, never independently.
         db.inTransaction(c -> {
             try (PreparedStatement ps = c.prepareStatement(ADVANCE_CUTLINE)) {
                 ps.setLong(1, newT.value());
@@ -205,7 +303,6 @@ public final class JdbcCatalog implements Catalog {
                 });
     }
 
-    // The first advance seeds a null frontier, after that it is strictly monotonic.
     private static final String ADVANCE_FRONTIER = """
             UPDATE modak.cutline
                SET replicated_lsn = ?, lake_snapshot_id = ?, updated_at = now()
@@ -217,7 +314,6 @@ public final class JdbcCatalog implements Catalog {
     @Override
     public void advanceMirrorFrontier(TableId table, Lsn lsn, LakeSnapshotId snapshot,
             Map<String, String> lakePropsPatch) {
-        // Frontier and lake_props must move in one transaction, never independently.
         db.inTransaction(c -> {
             try (PreparedStatement ps = c.prepareStatement(ADVANCE_FRONTIER)) {
                 ps.setLong(1, lsn.value());
@@ -261,7 +357,6 @@ public final class JdbcCatalog implements Catalog {
     public void publishCompaction(TableId table, LakeSnapshotId snapshot, DeltaBatch folded,
             Map<String, String> lakePropsPatch) {
         db.inTransaction(c -> {
-            // A reader pinned since the pre-check still merges these delta rows.
             try (PreparedStatement ps = c.prepareStatement(COUNT_PINS)) {
                 ps.setLong(1, table.oid());
                 try (var rs = ps.executeQuery()) {
@@ -319,7 +414,6 @@ public final class JdbcCatalog implements Catalog {
     public void publishRetention(TableId table, LakeSnapshotId snapshot, TierKey below,
             Map<String, String> lakePropsPatch) {
         db.inTransaction(c -> {
-            // A reader pinned since the pre-check still merges purged delta rows.
             try (PreparedStatement ps = c.prepareStatement(COUNT_PINS)) {
                 ps.setLong(1, table.oid());
                 try (var rs = ps.executeQuery()) {
@@ -381,7 +475,6 @@ public final class JdbcCatalog implements Catalog {
                 });
     }
 
-    // Independent minima across pins is conservative and always safe.
     private static final String READ_HORIZON = """
             SELECT min(pinned_tier_key_hi), min(pinned_lake_snapshot_id)
               FROM modak.read_pins WHERE table_id = ? AND expires_at > now()
@@ -446,7 +539,6 @@ public final class JdbcCatalog implements Catalog {
                         rs.getString(2), rs.getString(3)));
     }
 
-    // greatest() keeps the advance monotonic when a concurrent commit already moved S past ours.
     private static final String ADVANCE_SNAPSHOT_FLOOR = """
             UPDATE modak.cutline
                SET lake_snapshot_id = greatest(lake_snapshot_id, ?), updated_at = now()
@@ -462,7 +554,6 @@ public final class JdbcCatalog implements Catalog {
     @Override
     public void finishLoad(TableId table, List<String> labels, LakeSnapshotId snapshot,
             Map<String, String> lakePropsPatch) {
-        // Snapshot advance and label flips must land together, never independently.
         db.inTransaction(c -> {
             try (PreparedStatement ps = c.prepareStatement(ADVANCE_SNAPSHOT_FLOOR)) {
                 ps.setLong(1, snapshot.id());
@@ -491,12 +582,12 @@ public final class JdbcCatalog implements Catalog {
     }
 
     private static final String UPSERT_OP = """
-            INSERT INTO modak.tiering_log (op_id, table_id, op_kind, phase, lake_snapshot_id, details)
+            INSERT INTO modak.op_log (op_id, table_id, op_kind, phase, lake_snapshot_id, details)
             VALUES (?, ?, ?, ?, ?, ?::jsonb)
             ON CONFLICT (op_id) DO UPDATE
                SET phase = EXCLUDED.phase,
-                   lake_snapshot_id = coalesce(EXCLUDED.lake_snapshot_id, modak.tiering_log.lake_snapshot_id),
-                   details = coalesce(EXCLUDED.details, modak.tiering_log.details),
+                   lake_snapshot_id = coalesce(EXCLUDED.lake_snapshot_id, modak.op_log.lake_snapshot_id),
+                   details = coalesce(EXCLUDED.details, modak.op_log.details),
                    updated_at = now()
             """;
 
@@ -520,7 +611,7 @@ public final class JdbcCatalog implements Catalog {
     @Override
     public List<TieringOp> findIncompleteOps(TableId table, OpKind opKind) {
         return db.queryList(
-                "SELECT op_id, phase, lake_snapshot_id, details FROM modak.tiering_log "
+                "SELECT op_id, phase, lake_snapshot_id, details FROM modak.op_log "
                         + "WHERE table_id = ? AND op_kind = ? AND phase NOT IN (?, ?) "
                         + "ORDER BY updated_at",
                 ps -> {
@@ -613,13 +704,14 @@ public final class JdbcCatalog implements Catalog {
                 rs.getString("partition_scheme"),
                 rs.getString("lake_format"),
                 rs.getString("lake_table_ref"),
-                rs.getString("lake_props"),
-                rs.getInt("schema_version"),
+                rs.getString("storage_profile"),
                 TableMode.fromSql(rs.getString("mode")),
                 rs.getString("publication_name"),
                 rs.getString("slot_name"),
                 nullableLong(rs, "heap_retention_lag"),
-                nullableLong(rs, "lake_retention_lag"));
+                nullableLong(rs, "lake_retention_lag"),
+                rs.getBoolean("keep_heap"),
+                MaintenancePolicy.fromJson(rs.getString("maintenance_policy")));
     }
 
     private static Optional<Long> nullableLong(ResultSet rs, String column) throws SQLException {

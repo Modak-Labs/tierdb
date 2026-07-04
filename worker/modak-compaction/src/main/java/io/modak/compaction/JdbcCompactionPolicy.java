@@ -97,7 +97,6 @@ public final class JdbcCompactionPolicy implements CompactionPolicy {
                     boolean tombstone = rs.getShort(2) == 1;
                     boolean noPayload = rs.getBoolean(5);
                     Long oldTierKey = (Long) rs.getObject(6);
-                    // Tombstone payloads carry the pk fields, legacy tombstones have none.
                     Object[] row = null;
                     if (!noPayload) {
                         row = new Object[columns.size()];

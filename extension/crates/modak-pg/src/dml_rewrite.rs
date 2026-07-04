@@ -18,13 +18,8 @@ use crate::hook;
 use crate::pin::PgReadPins;
 use crate::planner::table_meta;
 
-/// Both halves range over this alias, so deparsed fragments bind in each.
 const ALIAS: &CStr = c"m";
 
-/// Spools the pinned lake scan through a temp table and hands the rows back
-/// as jsonb. The rewritten UPDATE/DELETE's cold half reads from this instead
-/// of scanning the lake inline, since pg_duckdb refuses any plan where a
-/// DuckDB scan feeds a Postgres write. Same transaction, same atomicity.
 #[pg_extern]
 fn modak_lake_rows(
     table: pg_sys::Oid,
@@ -33,7 +28,6 @@ fn modak_lake_rows(
 ) -> SetOfIterator<'static, pgrx::JsonB> {
     let t = TableId(u32::from(table));
     let mut meta = or_error(table_meta(t));
-    // The caller pinned S when it planned, so scan that snapshot, not the current one.
     meta.lake_metadata_location = metadata_location.to_string();
     require_nested_duckdb();
 
@@ -68,8 +62,6 @@ fn modak_lake_rows(
     }
 }
 
-/// pg_duckdb only allows DuckDB execution below the top-level statement when
-/// this GUC is on. An absent GUC means pg_duckdb itself is absent (tests).
 fn require_nested_duckdb() {
     let name = c"duckdb.unsafe_allow_execution_inside_functions";
     let value = unsafe {
@@ -88,8 +80,6 @@ fn require_nested_duckdb() {
     }
 }
 
-/// Returns the replacement query, or `None` to leave the statement untouched.
-/// Statements the split cannot honor error out loudly instead.
 pub(crate) unsafe fn maybe_rewrite(parse: *mut pg_sys::Query) -> Option<*mut pg_sys::Query> {
     let cmd = (*parse).commandType;
     if cmd != pg_sys::CmdType::CMD_UPDATE && cmd != pg_sys::CmdType::CMD_DELETE {
@@ -112,7 +102,6 @@ pub(crate) unsafe fn maybe_rewrite(parse: *mut pg_sys::Query) -> Option<*mut pg_
     {
         return None;
     }
-    // ONLY changes which heap rows the statement means, leave it alone.
     if !(*rte).inh {
         return None;
     }
@@ -127,14 +116,19 @@ unsafe fn rewrite(
     cmd: pg_sys::CmdType::Type,
     relid: pg_sys::Oid,
 ) -> Option<*mut pg_sys::Query> {
-    if hook::rewrite_kind(relid) != hook::Rewrite::Seam {
+    let kind = hook::rewrite_kind(relid);
+    if kind == hook::Rewrite::SeamKeepHeap {
+        if hook::explain_on() {
+            notice!("modak: keep-heap table, plain heap DML mirrored by trigger");
+        }
+        return None;
+    }
+    if kind != hook::Rewrite::Seam {
         return None;
     }
     let table = TableId(u32::from(relid));
     let cut = or_error(PgCatalog.current(table));
 
-    // Classification needs only the tier column and T, so provably hot
-    // statements return before anything touches lake metadata.
     let write_meta = or_error(crate::delta::write_meta(table));
     let tier_attno = pg_sys::get_attnum(relid, cstring(&write_meta.tier_key_col).as_ptr());
     let quals = (*(*parse).jointree).quals;
@@ -209,7 +203,6 @@ unsafe fn rewrite(
 
     let params = param_types(parse);
     let generated = hook::analyze_generated_sql_with_params(&sql, &params);
-    // Without this pass defaults, rules, and RLS silently stop applying.
     let rewritten = pg_sys::QueryRewrite(generated);
     if pg_sys::list_length(rewritten) != 1 {
         error!(
@@ -220,8 +213,6 @@ unsafe fn rewrite(
     Some(pg_sys::list_nth(rewritten, 0) as *mut pg_sys::Query)
 }
 
-/// The SET list as `(column, deparsed expression)` pairs, rejecting shapes a
-/// delta row image cannot represent.
 unsafe fn set_items(
     parse: *mut pg_sys::Query,
     meta: &modak_core::sqlgen::TableMeta,
@@ -257,9 +248,6 @@ unsafe fn set_items(
     items
 }
 
-/// RETURNING as `(output name, deparsed expression)` pairs. The renderer puts
-/// the names on the hot half and the expressions in the cold stash, so both
-/// halves produce the same output shape.
 unsafe fn returning_items(
     parse: *mut pg_sys::Query,
     dpcontext: *mut pg_sys::List,
@@ -298,10 +286,6 @@ fn or_error<T>(r: modak_core::Result<T>) -> T {
         Err(e) => error!("modak: {e}"),
     }
 }
-
-// Predicate extraction. Turns the WHERE clause into the TierPredicate the
-// classifier reasons over. Anything unprovable becomes Unknown, which
-// classifies as Mixed and takes the safe two-tier path.
 
 pub(crate) unsafe fn extract_predicate(
     node: *mut pg_sys::Node,
@@ -407,8 +391,6 @@ unsafe fn extract_in_list(
     )
 }
 
-/// At planner-hook time an IN list is still an ArrayExpr of Consts, while a
-/// bound array parameter arrives as a Const of an array type.
 unsafe fn in_list_values(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
     let node = strip_relabel(node);
     if (*node).type_ == pg_sys::NodeTag::T_ArrayExpr {
@@ -427,8 +409,6 @@ unsafe fn in_list_values(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
     const_i64_array(node)
 }
 
-/// The operator's catalog name, for built-in operators only. User-defined
-/// operators can mean anything, so they classify as Unknown.
 unsafe fn builtin_op_name(opno: pg_sys::Oid) -> Option<String> {
     if u32::from(opno) >= pg_sys::FirstNormalObjectId {
         return None;
@@ -460,7 +440,6 @@ unsafe fn strip_relabel(node: *mut pg_sys::Node) -> *mut pg_sys::Node {
             pg_sys::NodeTag::T_RelabelType => {
                 node = (*(node as *mut pg_sys::RelabelType)).arg as *mut pg_sys::Node;
             }
-            // Built-in integer widening casts preserve the value, see through them.
             pg_sys::NodeTag::T_FuncExpr => {
                 let f = node as *mut pg_sys::FuncExpr;
                 let int_result = (*f).funcresulttype == pg_sys::INT8OID
@@ -539,10 +518,6 @@ unsafe fn const_i64_array(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
     }
     Some(out)
 }
-
-// Deparsed fragments print bound parameters as $n. The generated text is
-// re-analyzed with the original statement's parameter types so plpgsql and
-// prepared statements keep working.
 
 struct ParamCollect {
     types: Vec<pg_sys::Oid>,

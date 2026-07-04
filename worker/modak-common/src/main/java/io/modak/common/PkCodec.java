@@ -3,10 +3,8 @@ package io.modak.common;
 import java.util.List;
 
 /**
- * Canonical text encoding of a (possibly composite) primary key, matching the
- * Rust side ({@code modak_core::sqlgen::encode_pk}) byte for byte. Single-column
- * keys stay the raw text value, multi-column keys escape {@code \} and the unit
- * separator (0x1F) in each part with {@code \}, then join on 0x1F.
+ * Canonical text encoding of a (possibly composite) primary key, matching
+ * the Rust side ({@code modak_core::sqlgen::encode_pk}) byte for byte.
  */
 public final class PkCodec {
 

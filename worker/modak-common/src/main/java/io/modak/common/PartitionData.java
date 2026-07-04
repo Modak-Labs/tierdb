@@ -9,7 +9,6 @@ public interface PartitionData {
     PartitionId partitionId();
     PartitionBounds bounds();
 
-    /** Row count when the carrier knows it, -1 when opaque. */
     default long rowCount() {
         return -1;
     }

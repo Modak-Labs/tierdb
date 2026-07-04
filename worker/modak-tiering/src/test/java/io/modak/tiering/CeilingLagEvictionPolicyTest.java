@@ -1,5 +1,6 @@
 package io.modak.tiering;
 
+import io.modak.tiering.policy.CeilingLagEvictionPolicy;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 

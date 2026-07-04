@@ -14,8 +14,6 @@ say "3. Worker tiers everything behind the high-water mark"
 wait_for "cut-line advanced to 200 (p0+p1 tiered)" \
     "SELECT tier_key_hi FROM modak.cutline WHERE table_id = 'public.events'::regclass::oid::bigint" \
     "200"
-# Premake adds future partitions and transparent writes adds the spill, so
-# check the two tiered partitions specifically rather than the child count.
 wait_for "tiered partitions physically dropped" \
     "SELECT count(*) FROM pg_inherits JOIN pg_class c ON c.oid = inhrelid \
      WHERE inhparent = 'public.events'::regclass \

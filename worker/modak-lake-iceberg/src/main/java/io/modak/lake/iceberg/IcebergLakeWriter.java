@@ -2,8 +2,8 @@ package io.modak.lake.iceberg;
 
 import io.modak.common.PartitionData;
 import io.modak.common.RowBatchData;
-import io.modak.lake.LakeWriter;
-import io.modak.lake.WriterInitContext;
+import io.modak.lake.commit.LakeWriter;
+import io.modak.lake.commit.WriterInitContext;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -28,10 +28,9 @@ import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 
 /**
- * Writes one hot partition's {@link RowBatchData} as Parquet data files into the
- * Iceberg table, fanning records out per Iceberg partition when the table has a
- * spec (tier-key truncate). Produces {@link DataFile} handles only, nothing is
- * visible until {@link IcebergLakeCommitter} commits the whole op as one snapshot.
+ * Writes one hot partition's {@link RowBatchData} as Parquet data files
+ * into the Iceberg table, fanning records out per Iceberg partition when
+ * the table has a spec (tier-key truncate).
  */
 final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
 
@@ -47,7 +46,6 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
     IcebergLakeWriter(Table table, WriterInitContext ctx) throws IOException {
         this.table = table;
         this.ctx = ctx;
-        // Partition-scoped ids plus UUID-salted filenames: crash re-runs cannot collide.
         this.files = OutputFileFactory.builderFor(
                         table, Math.abs(ctx.partition().id().hashCode()), System.nanoTime())
                 .format(FileFormat.PARQUET)
@@ -60,7 +58,6 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
             throw new IOException("Iceberg writer expects RowBatchData, got "
                     + data.getClass().getName());
         }
-        // Bound lazily so new heap columns can evolve the lake schema first.
         if (factory == null) {
             new IcebergSchemaEvolution(table).addMissing(batch.columns());
             factory = new GenericAppenderFactory(table.schema(), table.spec());
@@ -112,7 +109,6 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
         return new IcebergWriteResult(completed);
     }
 
-    // An empty partition still tiers as one empty file: journal and snapshot stay 1:1.
     private void emptyFile() {
         if (factory == null) {
             factory = new GenericAppenderFactory(table.schema(), table.spec());
@@ -134,7 +130,7 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
     @Override
     public void close() throws IOException {
         for (DataWriter<Record> writer : writers.values()) {
-            writer.close(); // idempotent, abandoned files are orphans until commit
+            writer.close();
         }
     }
 
@@ -148,7 +144,6 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
         if (type.typeId() == Type.TypeID.FLOAT && v instanceof Double d) {
             return (float) (double) d;
         }
-        // Parquet requires the value's scale to match the column's declared scale.
         if (type instanceof Types.DecimalType dec && v instanceof BigDecimal bd) {
             return bd.setScale(dec.scale(), RoundingMode.HALF_UP);
         }

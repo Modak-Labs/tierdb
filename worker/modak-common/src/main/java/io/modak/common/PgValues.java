@@ -28,7 +28,6 @@ public final class PgValues {
 
     private PgValues() {}
 
-    // PG timestamp text: "2026-01-02 03:04:05[.ffffff][+HH[:mm[:ss]]]".
     private static final DateTimeFormatter PG_TIMESTAMP = new DateTimeFormatterBuilder()
             .append(DateTimeFormatter.ISO_LOCAL_DATE)
             .appendLiteral(' ')
@@ -41,13 +40,11 @@ public final class PgValues {
             .optionalEnd()
             .toFormatter();
 
-    /** Maps a Postgres type name (either spelling) to a portable column. */
     public static Column column(String name, String pgTypeName, int precision, int scale) {
         ColumnType type = switch (pgTypeName) {
             case "bool", "boolean" -> ColumnType.BOOLEAN;
             case "int2", "smallint", "int4", "integer", "int8", "bigint", "oid" -> ColumnType.LONG;
             case "float4", "real", "float8", "double precision" -> ColumnType.DOUBLE;
-            // Unconstrained numeric has no precision to give a decimal(p,s) lake type.
             case "numeric", "decimal" -> precision > 0 ? ColumnType.DECIMAL : ColumnType.DOUBLE;
             case "timestamp", "timestamp without time zone",
                     "timestamptz", "timestamp with time zone" -> ColumnType.TIMESTAMP;
@@ -61,7 +58,6 @@ public final class PgValues {
                 : new Column(name, type);
     }
 
-    /** Reads one value off a result set as the type's canonical Java representation. */
     public static Object readValue(ResultSet rs, int idx, ColumnType type) throws SQLException {
         Object v = switch (type) {
             case LONG -> rs.getLong(idx);
@@ -78,7 +74,6 @@ public final class PgValues {
         return rs.wasNull() ? null : v;
     }
 
-    /** SQL cast that turns a {@code payload ->> col} text back into the native type. */
     public static String castSuffix(ColumnType type) {
         return switch (type) {
             case LONG -> "::bigint";
@@ -93,7 +88,6 @@ public final class PgValues {
         };
     }
 
-    /** Parses Postgres text output (pgoutput tuples, {@code ::text} casts) into the canonical value. */
     public static Object parseText(String text, ColumnType type) {
         return switch (type) {
             case LONG -> Long.parseLong(text);
@@ -108,7 +102,6 @@ public final class PgValues {
         };
     }
 
-    /** PG timestamp/timestamptz text output, normalized to UTC. */
     public static OffsetDateTime parseTimestamp(String text) {
         TemporalAccessor parsed = PG_TIMESTAMP.parseBest(
                 text, OffsetDateTime::from, LocalDateTime::from);

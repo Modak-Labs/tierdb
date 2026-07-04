@@ -1,7 +1,5 @@
 //! Catalog adapters: read `modak.cutline` and `modak.delta` via SPI,
-//! implementing the pure [`modak_core::ports`] read ports. Every call runs
-//! inside the caller's transaction, so cut-line and delta reads are one
-//! consistent MVCC pair.
+//! implementing the pure [`modak_core::ports`] read ports.
 
 use modak_core::domain::{
     Cutline, DeltaEntry, DeltaOp, DeltaSnapshot, KeyRange, LakeSnapshotId, Pk, TableId, TierKey,
@@ -52,8 +50,6 @@ impl CutlineReader for PgCatalog {
 }
 
 impl PgCatalog {
-    /// The retention line `R` (lake rows with `tier_key < R` are expired),
-    /// or `None` when nothing has been expired yet.
     pub fn retention_line(&self, table: TableId) -> Result<Option<TierKey>> {
         Spi::connect(|client| {
             let mut rows = client

@@ -19,10 +19,11 @@ public final class SeamClient {
     private static final String TABLE_SQL = """
             SELECT t.table_id, t.primary_key_cols, t.tier_key_col, t.mode,
                    t.lake_format, t.lake_table_ref,
-                   t.lake_props ->> 'metadata_location',
-                   (t.lake_props ->> 'snapshot_id')::bigint,
+                   c.lake_props ->> 'metadata_location',
+                   (c.lake_props ->> 'snapshot_id')::bigint,
                    t.heap_retention_lag
               FROM modak.tables t
+              LEFT JOIN modak.cutline c USING (table_id)
              WHERE t.schema_name = ? AND t.table_name = ?
             """;
 
@@ -82,10 +83,6 @@ public final class SeamClient {
         }
     }
 
-    /**
-     * True when the table is mirrored without heap retention, the only shape a
-     * hybrid read applies to.
-     */
     private static boolean hybridEligible(Connection c, SeamOptions options) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(HYBRID_ELIGIBLE_SQL)) {
             ps.setString(1, options.schemaName());
@@ -96,12 +93,6 @@ public final class SeamClient {
         }
     }
 
-    /**
-     * Waits (bounded by {@link SeamOptions#mirrorWait}) for the mirror frontier
-     * to pass the WAL position observed at call time, so the lake provably
-     * holds everything committed before this capture. False means fall back to
-     * the heap.
-     */
     private static boolean waitForFrontier(Connection c, SeamOptions options) throws SQLException {
         long target;
         try (PreparedStatement ps = c.prepareStatement(
@@ -207,10 +198,6 @@ public final class SeamClient {
                 hybridSeam, pinId);
     }
 
-    /**
-     * The seam a hybrid read splits at: {@code max(tier_key) - hybridLag} from
-     * the heap. Null (heap fallback) when the table is empty.
-     */
     private static Long hybridSeam(Connection c, SeamOptions options, String tierKeyCol)
             throws SQLException {
         String sql = "SELECT max(" + quoteIdent(tierKeyCol) + ") FROM "

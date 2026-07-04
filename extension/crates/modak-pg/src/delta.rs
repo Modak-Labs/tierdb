@@ -1,7 +1,6 @@
 //! Write-path internals shared by the explicit router functions and the
-//! transparent-insert spill route: table write metadata, the delta upsert and
-//! tombstone statements, and the retention floor check. One module so the two
-//! paths cannot drift.
+//! transparent-insert spill route: table write metadata, the delta upsert
+//! and tombstone statements, and the retention floor check.
 
 use modak_core::domain::TableId;
 use modak_core::{ModakError, Result};
@@ -14,14 +13,13 @@ pub(crate) struct WriteMeta {
     pub table: String,
     pub pk_cols: Vec<String>,
     pub tier_key_col: String,
+    pub keep_heap: bool,
 }
 
-const WRITE_META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col \
+const WRITE_META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col, \
+            keep_heap \
      FROM modak.tables WHERE table_id = $1";
 
-// Sequence-assigned versions: newest-wins ordering, gap-tolerant fold clears.
-// The conflict arm keeps old_tier_key pointing at the partition the lake still
-// holds the image in, so a correction after a cross-tier move deletes there.
 pub(crate) const UPSERT_DELTA_SQL: &str = "INSERT INTO modak.delta AS d \
        (table_id, pk, op, tier_key, version, payload) \
      VALUES ($1, $2, 0, $3, nextval('modak.delta_version'), $4) \
@@ -31,7 +29,6 @@ pub(crate) const UPSERT_DELTA_SQL: &str = "INSERT INTO modak.delta AS d \
            version = EXCLUDED.version, payload = EXCLUDED.payload, updated_at = now() \
      WHERE EXCLUDED.version >= d.version";
 
-// Tombstones keep the key fields as payload: the equality delete needs typed values.
 pub(crate) const TOMBSTONE_DELTA_SQL: &str = "INSERT INTO modak.delta AS d \
        (table_id, pk, op, tier_key, version, payload) \
      VALUES ($1, $2, 1, $3, nextval('modak.delta_version'), $4) \
@@ -67,6 +64,10 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             .get_by_name::<String, _>("tier_key_col")
             .map_err(catalog_err)?
             .ok_or_else(|| catalog_err("tier_key_col is NULL"))?;
+        let keep_heap = row
+            .get_by_name::<bool, _>("keep_heap")
+            .map_err(catalog_err)?
+            .unwrap_or(false);
         if pk_cols.is_empty() {
             return Err(ModakError::Planning(format!(
                 "table {table:?} has no primary key columns"
@@ -77,6 +78,7 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             table: name,
             pk_cols,
             tier_key_col: tier,
+            keep_heap,
         })
     })
 }

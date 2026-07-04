@@ -12,6 +12,8 @@ services:
       MODAK_S3_ENDPOINT: minio:9000
       MODAK_S3_ACCESS_KEY: minioadmin
       MODAK_S3_SECRET_KEY: minioadmin
+      # Scoped read secret for the second warehouse (storage profile demo)
+      MODAK_READ_SECRET_ANALYTICS: type=S3;key_id=analytics;secret=analytics-secret;endpoint=minio:9000;url_style=path;use_ssl=false;scope=s3://analytics/
     ports:
       - "5432:5432"
     volumes:
@@ -47,7 +49,10 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/warehouse
+      mc mb --ignore-existing local/warehouse &&
+      mc mb --ignore-existing local/analytics &&
+      (mc admin user add local analytics analytics-secret || true) &&
+      mc admin policy attach local readwrite --user analytics || true
       "
 
   worker:
@@ -68,6 +73,8 @@ services:
       MODAK_S3_ACCESS_KEY: minioadmin
       MODAK_S3_SECRET_KEY: minioadmin
       MODAK_S3_SSL: "false"
+      # Credential set for the 'analytics' storage profile (by reference)
+      MODAK_CREDENTIALS_ANALYTICS: s3.access-key=analytics;s3.secret-key=analytics-secret
       MODAK_CYCLE_INTERVAL_SECONDS: "5"
       MODAK_TIERING_LAG: "0"
       MODAK_CONSOLE_PORT: "9090"

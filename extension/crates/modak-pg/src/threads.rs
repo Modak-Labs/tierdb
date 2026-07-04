@@ -1,8 +1,5 @@
-//! pg_duckdb runs parts of a plan on DuckDB worker threads, and those threads
-//! re-enter the executor hooks. Any `pg_sys` call from such a thread trips
-//! pgrx's thread check and aborts the backend, so every hook first checks the
-//! thread and, on a foreign one, forwards through these raw bindings, which
-//! bypass pgrx's FFI shim and touch none of our state.
+//! pg_duckdb runs parts of a plan on DuckDB worker threads, and those
+//! threads re-enter the executor hooks.
 
 pub(crate) fn is_main_thread() -> bool {
     #[cfg(target_os = "macos")]
@@ -13,7 +10,6 @@ pub(crate) fn is_main_thread() -> bool {
     true
 }
 
-// Only the foreign-thread forwarding path may call these.
 #[allow(non_snake_case)]
 pub(crate) mod raw {
     use core::ffi::c_int;

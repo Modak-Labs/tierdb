@@ -8,10 +8,10 @@ import io.modak.common.OpKind;
 import io.modak.common.OpPhase;
 import io.modak.common.TableId;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitResult;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitResult;
 import io.modak.lake.LakeStorage;
-import io.modak.lake.LakeTieringProps;
+import io.modak.lake.commit.LakeTieringProps;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Objects;
@@ -19,10 +19,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * One cycle: select a delta batch, fold it into the cold base as one snapshot,
- * advance {@code S} and clear the folded rows atomically. Read-pins block the
- * cycle (a pinned reader merges live delta over its older snapshot). Folding is
- * idempotent, so a crashed op is abandoned and simply re-folds next cycle.
+ * One cycle: select a delta batch, fold it into the cold base as one
+ * snapshot, advance {@code S} and clear the folded rows atomically.
  */
 public final class CompactionWorker {
 

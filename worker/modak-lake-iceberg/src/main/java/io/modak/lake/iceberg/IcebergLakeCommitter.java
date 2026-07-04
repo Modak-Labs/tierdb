@@ -2,10 +2,10 @@ package io.modak.lake.iceberg;
 
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.OpKind;
-import io.modak.lake.CommittedLakeSnapshot;
-import io.modak.lake.LakeCommitResult;
-import io.modak.lake.LakeCommitter;
-import io.modak.lake.LakeTieringProps;
+import io.modak.lake.commit.CommittedLakeSnapshot;
+import io.modak.lake.commit.LakeCommitResult;
+import io.modak.lake.commit.LakeCommitter;
+import io.modak.lake.commit.LakeTieringProps;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,10 +17,8 @@ import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
 
 /**
- * Commits one tiering op's data files as ONE Iceberg snapshot, stamped with the
- * {@link LakeTieringProps} crash resume recovers from. {@link LakeSnapshotId}
- * carries the Iceberg <b>sequence number</b>, not the snapshot id, since the catalog's
- * monotonic guards need an ordered value and snapshot ids are random longs.
+ * Commits one tiering op's data files as ONE Iceberg snapshot, stamped
+ * with the {@link LakeTieringProps} crash resume recovers from.
  */
 final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, IcebergCommittable> {
 
@@ -99,8 +97,6 @@ final class IcebergLakeCommitter implements LakeCommitter<IcebergWriteResult, Ic
     @Override
     public void close() {}
 
-    // Only same-kind snapshots count: compaction folds, mirror applies and tiering
-    // commits all carry an op-id, and each resume protocol must only claim its own.
     private Snapshot latestSnapshotOf(String opId, String opKind) {
         Snapshot best = null;
         for (Snapshot s : table.snapshots()) {

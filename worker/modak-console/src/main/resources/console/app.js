@@ -64,7 +64,7 @@ function lineOption(seriesMap, formatter) {
 }
 
 function fmtBytes(v) {
-  if (v == null) return "—";
+  if (v == null) return "·";
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let i = 0;
   let n = Number(v);
@@ -73,12 +73,12 @@ function fmtBytes(v) {
 }
 
 function fmtNum(v) {
-  if (v == null || Number(v) < -9e18) return "—"; // Long.MIN sentinel on mirrored cutlines
+  if (v == null || Number(v) < -9e18) return "·"; // Long.MIN sentinel on mirrored cutlines
   return Number(v).toLocaleString("en-US");
 }
 
 function fmtAgo(epoch) {
-  if (!epoch) return "—";
+  if (!epoch) return "·";
   const s = Math.max(0, Math.floor(Date.now() / 1000) - epoch);
   if (s < 60) return s + "s ago";
   if (s < 3600) return Math.floor(s / 60) + "m ago";
@@ -112,7 +112,7 @@ function groupSeries(all, prefix, only) {
 let lastOverview = null;
 
 function stateBar(states) {
-  if (!states) return '<span class="dim">—</span>';
+  if (!states) return '<span class="dim">·</span>';
   const order = ["hot", "sealing", "tiering", "tiered", "dropped"];
   return '<span class="state-bar">' + order
     .filter(s => states[s])
@@ -155,7 +155,7 @@ function renderOverview(o) {
     const mode = t.copying
       ? `<span class="badge copying">copying · ${fmtNum(t.copyChunks)} chunks</span>`
       : `<span class="badge ${t.mode}">${t.mode}</span>`;
-    const lag = t.mode === "mirrored" ? fmtBytes(t.lagBytes) : '<span class="dim">—</span>';
+    const lag = t.mode === "mirrored" ? fmtBytes(t.lagBytes) : '<span class="dim">·</span>';
     return `<tr data-id="${t.id}">
       <td>${esc(t.schema)}.${esc(t.name)}</td>
       <td>${mode}</td>
@@ -165,12 +165,33 @@ function renderOverview(o) {
       <td>${fmtNum(t.deltaBacklog)}</td>
       <td>${fmtNum(t.readPins)}</td>
       <td>${stateBar(t.partitions)}</td>
+      <td>${lakeSummary(t)}</td>
     </tr>`;
   }).join("");
   document.getElementById("fleet").innerHTML = rows;
   document.getElementById("fleet-empty").hidden = o.tables.length > 0;
   document.querySelectorAll("#fleet tr").forEach(tr =>
     tr.addEventListener("click", () => { location.hash = "#/table/" + tr.dataset.id; }));
+}
+
+function renderProfiles(profiles) {
+  document.getElementById("profiles").innerHTML = profiles.map(p => `<tr>
+    <td>${esc(p.name)}${p.isDefault ? ' <span class="badge tiered">default</span>' : ""}</td>
+    <td>${p.lakeFormat ? esc(p.lakeFormat) : '<span class="dim">worker env</span>'}</td>
+    <td>${p.warehouse ? esc(p.warehouse) : '<span class="dim">worker env</span>'}</td>
+    <td>${p.credentialRef ? esc(p.credentialRef) : '<span class="dim">worker default</span>'}</td>
+    <td>${fmtNum(p.tables)}</td>
+  </tr>`).join("");
+}
+
+function lakeSummary(t) {
+  if (!t.lake) return '<span class="dim">·</span>';
+  const parts = [];
+  if (t.lake.files != null) parts.push(fmtNum(t.lake.files) + " files");
+  if (t.lake.bytes != null) parts.push(fmtBytes(t.lake.bytes));
+  const warn = t.lakeWarnings
+    ? ` <span class="badge warn">${fmtNum(t.lakeWarnings)} ⚠</span>` : "";
+  return esc(parts.join(" · ")) + warn;
 }
 
 function card(label, value, sub, accent) {
@@ -203,6 +224,7 @@ function renderTable(t) {
     card("cutline T", fmtNum(fleet.cutlineT), "snapshot S: " + fmtNum(fleet.cutlineS), true),
     card("delta backlog", fmtNum(fleet.deltaBacklog), "read pins: " + fmtNum(fleet.readPins)),
     card("lake", esc(t.lakeFormat), t.lakeRef),
+    card("storage profile", esc(t.storageProfile), "warehouse binding"),
   ];
   if (t.mode === "mirrored") {
     cells.push(card("mirror lag", fmtBytes(fleet.lagBytes),
@@ -225,15 +247,131 @@ function renderTable(t) {
   </tr>`).join("");
   document.getElementById("partitions-empty").hidden = t.partitions.length > 0;
 
-  document.getElementById("detail-ops").innerHTML = t.ops.map(op => `<tr>
+  lastOps = t.ops;
+  renderOps();
+  document.getElementById("ops-empty").hidden = t.ops.length > 0;
+
+  renderLakePanel(t);
+}
+
+let lastOps = [];
+const openOps = new Set();
+
+function renderOps() {
+  document.getElementById("detail-ops").innerHTML = lastOps.map(op => {
+    const has = op.details && Object.keys(op.details).length > 0;
+    if (!has) {
+      return `<tr>
     <td>${esc(op.kind)}</td>
     <td>${esc(op.phase)}</td>
     <td>${fmtNum(op.snapshot)}</td>
-    <td class="dim">${esc(op.details ? JSON.stringify(op.details) : "—")}</td>
+    <td class="dim">·</td>
     <td class="dim">${fmtAgo(op.updatedAt)}</td>
-  </tr>`).join("");
-  document.getElementById("ops-empty").hidden = t.ops.length > 0;
+  </tr>`;
+    }
+    const open = openOps.has(op.opId);
+    let rows = `<tr>
+    <td>${esc(op.kind)}</td>
+    <td>${esc(op.phase)}</td>
+    <td>${fmtNum(op.snapshot)}</td>
+    <td class="dim op-details" data-op="${esc(op.opId)}">
+      <span class="caret">${open ? "▾" : "▸"}</span>${esc(JSON.stringify(op.details))}</td>
+    <td class="dim">${fmtAgo(op.updatedAt)}</td>
+  </tr>`;
+    if (open) {
+      rows += `<tr class="op-expand"><td colspan="5"><pre>${
+        esc(JSON.stringify(op.details, null, 2))}</pre></td></tr>`;
+    }
+    return rows;
+  }).join("");
 }
+
+document.getElementById("detail-ops").addEventListener("click", e => {
+  const cell = e.target.closest("td.op-details");
+  if (!cell) return;
+  const id = cell.dataset.op;
+  openOps.has(id) ? openOps.delete(id) : openOps.add(id);
+  renderOps();
+});
+
+function renderLakePanel(t) {
+  const panel = document.getElementById("lake-panel");
+  panel.hidden = !t.lake;
+  if (!t.lake) return;
+
+  renderMaintainControls(t);
+
+  document.getElementById("lake-collected").textContent =
+    "collected " + fmtAgo(t.lake.collectedAt);
+
+  document.getElementById("lake-warnings").innerHTML = (t.lake.warnings || [])
+    .map(w => `<div class="lake-warning">⚠ ${esc(w)}</div>`).join("");
+
+  document.getElementById("lake-stats").innerHTML =
+    Object.entries(t.lake.stats || {}).map(([key, value]) => {
+      const bytes = key.endsWith("bytes");
+      return card(esc(key.replaceAll("_", " ")),
+        bytes ? fmtBytes(value) : fmtNum(value), "");
+    }).join("");
+
+  document.getElementById("lake-policy").innerHTML =
+    Object.entries(t.lake.policy || {}).map(([key, value]) =>
+      `<tr><td class="dim">${esc(key)}</td><td>${esc(value)}</td></tr>`).join("");
+
+  const last = t.ops.find(op => op.kind === "maintenance");
+  document.getElementById("lake-maintenance").innerHTML = last
+    ? Object.entries(last.details || {}).map(([key, value]) =>
+        `<tr><td class="dim">${esc(key.replaceAll("_", " "))}</td><td>${fmtNum(value)}</td></tr>`)
+      .join("") + `<tr><td class="dim">ran</td><td>${fmtAgo(last.updatedAt)}</td></tr>`
+    : "";
+  document.getElementById("lake-maintenance-empty").hidden = !!last;
+}
+
+let maintainNote = null;
+
+function renderMaintainControls(t) {
+  const btn = document.getElementById("maintain-btn");
+  const status = document.getElementById("maintain-status");
+  btn.disabled = !!t.maintenancePending;
+  if (t.maintenancePending) {
+    maintainNote = null;
+    status.hidden = false;
+    status.textContent = "maintenance pending; requested by "
+      + t.maintenancePending.requestedBy + " " + fmtAgo(t.maintenancePending.requestedAt);
+  } else if (maintainNote && Date.now() - maintainNote.at < 10000) {
+    status.hidden = false;
+    status.textContent = maintainNote.text;
+  } else {
+    maintainNote = null;
+    status.hidden = true;
+  }
+}
+
+async function requestMaintenance() {
+  const id = currentTableId();
+  if (id === null) return;
+  const btn = document.getElementById("maintain-btn");
+  const status = document.getElementById("maintain-status");
+  btn.disabled = true;
+  status.hidden = false;
+  status.textContent = "requesting…";
+  try {
+    const res = await fetch("/api/v1/tables/" + id + "/maintenance", { method: "POST" });
+    const out = await res.json();
+    maintainNote = {
+      text: out.requested
+        ? "requested; the leader runs the pass within its cycle"
+        : "request failed: " + (out.error || res.status),
+      at: Date.now(),
+    };
+    status.textContent = maintainNote.text;
+  } catch (e) {
+    maintainNote = { text: "request failed: " + e, at: Date.now() };
+    status.textContent = maintainNote.text;
+  }
+}
+
+document.getElementById("maintain-btn").addEventListener("click", requestMaintenance);
 
 function renderTableCharts(all, name) {
   const merged = {};
@@ -244,6 +382,15 @@ function renderTableCharts(all, name) {
   chart("chart-detail").setOption(lineOption(merged, fmtNum), true);
   chart("chart-detail-commits").setOption(
     lineOption(groupSeries(all, "lake_commits", name), fmtNum), true);
+
+  const files = {};
+  const dataFiles = groupSeries(all, "lake_files", name)[name];
+  const deleteFiles = groupSeries(all, "lake_delete_files", name)[name];
+  if (dataFiles) files["data files"] = dataFiles;
+  if (deleteFiles) files["delete files"] = deleteFiles;
+  chart("chart-lake-files").setOption(lineOption(files, fmtNum), true);
+  chart("chart-lake-bytes").setOption(
+    lineOption(groupSeries(all, "lake_bytes", name), fmtBytes), true);
 }
 
 /* ---------- playground ---------- */
@@ -252,7 +399,7 @@ const SNIPPETS = [
   ["Fleet status", "SELECT * FROM modak.status;"],
   ["Partition lifecycle", "SELECT * FROM modak.partitions ORDER BY table_id, tier_key_lo;"],
   ["Delta backlog", "SELECT t.schema_name || '.' || t.table_name AS tbl, count(d.*) AS backlog\nFROM modak.tables t LEFT JOIN modak.delta d USING (table_id)\nGROUP BY 1 ORDER BY 2 DESC;"],
-  ["Recent operations", "SELECT op_kind, phase, lake_snapshot_id, details, updated_at\nFROM modak.tiering_log ORDER BY updated_at DESC LIMIT 20;"],
+  ["Recent operations", "SELECT op_kind, phase, lake_snapshot_id, details, updated_at\nFROM modak.op_log ORDER BY updated_at DESC LIMIT 20;"],
   ["Replication slots", "SELECT slot_name, active, pg_size_pretty(\n  pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained\nFROM pg_replication_slots WHERE slot_name LIKE 'modak\\_%';"],
   ["Create a demo table", "CREATE TABLE public.readings (\n  id bigint PRIMARY KEY,\n  reading_time bigint NOT NULL,\n  value double precision\n);\n-- then: docker compose run --rm worker register \\\n--   --table public.readings --pk id --tier-key reading_time"],
 ];
@@ -320,7 +467,7 @@ async function runSql() {
   status.textContent = "running…";
   status.className = "sql-status";
   try {
-    const res = await fetch("/api/query", { method: "POST", body: sql });
+    const res = await fetch("/api/v1/query", { method: "POST", body: sql });
     const out = await res.json();
     renderResults(out);
     if (!out.error) histPush(sql);
@@ -340,7 +487,7 @@ async function explainSql() {
   status.textContent = "explaining…";
   status.className = "sql-status";
   try {
-    const res = await fetch("/api/explain", { method: "POST", body: sql });
+    const res = await fetch("/api/v1/explain", { method: "POST", body: sql });
     renderExplain(await res.json());
   } catch (e) {
     renderExplain({ error: String(e) });
@@ -381,7 +528,7 @@ function renderResults(out) {
   status.className = "sql-status";
   status.textContent = out.elapsedMs + " ms";
   if (out.columns) {
-    title.textContent = `Results — ${fmtNum(out.rowCount)} row(s)`
+    title.textContent = `Results: ${fmtNum(out.rowCount)} row(s)`
       + (out.truncated ? ` (showing first ${fmtNum(out.rowCount)})` : "");
     const head = out.columns.map(c =>
       `<th>${esc(c.name)} <span class="type">${esc(c.type)}</span></th>`).join("");
@@ -390,13 +537,13 @@ function renderResults(out) {
     box.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
   } else {
     title.textContent = "Results";
-    box.innerHTML = `<div class="empty">OK — ${fmtNum(out.updateCount)} row(s) affected.</div>`;
+    box.innerHTML = `<div class="empty">OK: ${fmtNum(out.updateCount)} row(s) affected.</div>`;
   }
 }
 
 async function loadSchema() {
   try {
-    const { tables } = await getJson("/api/schema");
+    const { tables } = await getJson("/api/v1/schema");
     document.getElementById("schema-tree").innerHTML = tables.map((t, i) =>
       `<div class="schema-table" data-i="${i}">
         <div class="name">${esc(t.name)}</div>
@@ -444,10 +591,14 @@ async function tick() {
   const view = currentView();
   showView(view);
   try {
-    const overview = await getJson("/api/overview");
+    const overview = await getJson("/api/v1/overview");
     renderOverview(overview);
+    if (view === "overview") {
+      const { profiles } = await getJson("/api/v1/storage-profiles");
+      renderProfiles(profiles);
+    }
     if (view === "table") {
-      const t = await getJson("/api/table?id=" + currentTableId());
+      const t = await getJson("/api/v1/tables/" + currentTableId());
       renderTable(t);
     }
   } catch (e) {
@@ -461,7 +612,7 @@ async function tickSeries() {
   const view = currentView();
   if (view === "sql") return;
   try {
-    const { series } = await getJson("/api/series");
+    const { series } = await getJson("/api/v1/series");
     if (view === "overview") {
       renderOverviewCharts(series);
     } else {

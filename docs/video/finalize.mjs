@@ -45,7 +45,7 @@ const parts = [
   { name: "outro", speed: 1.0,
     say: "Tiering, folding, and partition premake, all in the background, all visible." },
   { name: "card-outro", card: true, minDur: 3.6,
-    say: "Modak. Postgres as the hot tier of an open lakehouse." },
+    say: "Modak. Tier-aware data federation between Postgres and Apache Iceberg." },
 ];
 
 // 1. Narration audio, then measure it.

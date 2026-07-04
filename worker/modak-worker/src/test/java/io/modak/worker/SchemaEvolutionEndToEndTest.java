@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -18,7 +20,7 @@ import io.modak.common.TierKey;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -47,10 +49,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Additive schema evolution end to end, on both write paths: a mirrored table's
- * pump flushes in-flight rows then evolves Iceberg on ADD COLUMN (and dies
- * cleanly on destructive DDL), and a tiered table's flush adds heap columns the
- * lake has never seen before writing.
+ * Additive schema evolution end to end, on both write paths: the mirror
+ * pump and the tiering flush both evolve Iceberg on ADD COLUMN, and
+ * destructive DDL fails cleanly.
  */
 class SchemaEvolutionEndToEndTest {
 
@@ -119,7 +120,6 @@ class SchemaEvolutionEndToEndTest {
                     fleetRows(),
                     "pre-DDL rows read NULL for the new column; post-DDL rows carry it");
 
-            // Destructive: the pump must die, not diverge or spin.
             exec("ALTER TABLE public.fleet DROP COLUMN vin");
             exec("INSERT INTO public.fleet VALUES (4, 260, 'green')");
             pump.join(30_000);
@@ -154,7 +154,7 @@ class SchemaEvolutionEndToEndTest {
         TableId table = catalog.register(new TableRegistration(
                 Long.parseLong(queryOne("SELECT 'public.metrics'::regclass::oid::bigint::text")),
                 "public", "metrics", List.of("id"), "event_time",
-                "{\"unit\":\"range\"}", IcebergLakeStoragePlugin.IDENTIFIER, location, null));
+                "{\"unit\":\"range\"}", IcebergLakeStoragePlugin.IDENTIFIER, location));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
         PartitionId p0 = new PartitionId(table, "metrics_p0");

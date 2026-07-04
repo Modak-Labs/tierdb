@@ -44,7 +44,7 @@ const cards = {
   "card-sweep": { title: "The worker takes it from here", sub: "Every sweep, partitions behind the high-water mark move into Iceberg. Watch it happen, live." },
   "card-dml": { title: "Plain SQL. Any row. Either tier.", sub: "SELECT, INSERT, UPDATE, DELETE work across the whole timeline. Explain shows exactly where rows come from and go to." },
   "card-fold": { title: "Moments later", sub: "The worker folds the correction into Iceberg. The delta drains to zero, and the corrected row now lives in the lake." },
-  "card-outro": { brand: true, title: "", sub: "Postgres as the hot tier of an open lakehouse.", small: "github.com/addu390/modak &middot; beta" },
+  "card-outro": { brand: true, title: "", sub: "Tier-aware data federation between Postgres and Apache Iceberg.", small: "github.com/addu390/modak &middot; beta" },
 };
 
 const browser = await chromium.launch();

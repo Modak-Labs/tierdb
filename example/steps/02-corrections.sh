@@ -43,8 +43,6 @@ echo "$RESULT_TRANSPARENT"
 assert_eq "transparent read" "$EXPECTED" "$RESULT_TRANSPARENT"
 
 say "6c. Plain UPDATE and DELETE on cold rows (planner rewrite, real lake scan)"
-# id=2 and id=4 are cold, so the rewrite spools the lake scan and writes the
-# delta. Delta rows fold within a sweep, so assert on read effects instead.
 EXPECTED="2|20|B?
 3|110|C!
 5|250|e

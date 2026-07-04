@@ -13,7 +13,7 @@ any row, wherever it lives.
 
 !!! note "Status: beta"
     Modak has not cut a stable release. Interfaces can still change. See the
-    note in [Production deployment](guides/production.md) before running it
+    note in [Production deployment](operations/production.md) before running it
     anywhere that matters.
 
 Each table chooses how the two systems share its rows:
@@ -53,7 +53,7 @@ protocol that makes a two-tier table read like one table.
 
 Postgres itself, the S3-compatible object store, and the optional Iceberg REST
 catalog are yours. Modak never hosts them. See
-[Production deployment](guides/production.md) for the full boundary.
+[Production deployment](operations/production.md) for the full boundary.
 
 ## Start here
 
@@ -61,7 +61,9 @@ catalog are yours. Modak never hosts them. See
   walkthrough in about ten minutes.
 - [Concepts](getting-started/concepts.md): the five ideas the rest of the docs
   assume. Table modes, tier key, cut-line, pinned snapshot, delta.
-- [The contract](getting-started/contract.md): the mode-by-mode matrix of what
+- [Choosing a mode](modes/choosing.md): which mode fits your workload, decided
+  from the shape of the data.
+- [The contract](modes/contract.md): the mode-by-mode matrix of what
   you can read, write, and correct, and which surface does it.
-- [Architecture](architecture.md): how the extension, the worker, and the
-  catalog cooperate without ever calling each other.
+- [Architecture](getting-started/architecture.md): how the extension, the
+  worker, and the catalog cooperate without ever calling each other.

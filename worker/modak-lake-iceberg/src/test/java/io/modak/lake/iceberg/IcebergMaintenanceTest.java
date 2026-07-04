@@ -11,13 +11,13 @@ import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitter;
-import io.modak.lake.LakeTieringProps;
-import io.modak.lake.LakeWriter;
-import io.modak.lake.MaintenanceConfig;
-import io.modak.lake.MaintenanceResult;
-import io.modak.lake.WriterInitContext;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitter;
+import io.modak.lake.commit.LakeTieringProps;
+import io.modak.lake.commit.LakeWriter;
+import io.modak.lake.maintain.MaintenancePlan;
+import io.modak.lake.maintain.MaintenanceResult;
+import io.modak.lake.commit.WriterInitContext;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -67,7 +67,21 @@ class IcebergMaintenanceTest {
         return props;
     }
 
-    /** One small commit: a couple of rows per tier-key band -> tiny files. */
+    private static MaintenancePlan plan(Map<String, String> settings, long pinnedFloor) {
+        return new MaintenancePlan(settings, pinnedFloor, List.of());
+    }
+
+    private static Map<String, String> inert() {
+        Map<String, String> settings = new HashMap<>();
+        settings.put("rewrite_target_bytes", "1");
+        settings.put("rewrite_min_input_files", "1000");
+        settings.put("snapshot_retention_hours", String.valueOf(Long.MAX_VALUE / 3_600_000L));
+        settings.put("snapshot_min_retained", "100");
+        settings.put("delete_compaction_min_deletes", "1000");
+        settings.put("manifest_rewrite_min_manifests", "100000");
+        return settings;
+    }
+
     private void smallCommit(long... tierKeys) throws Exception {
         IcebergTieringFactory factory = new IcebergTieringFactory(tables);
         PartitionId pid = new PartitionId(TABLE, "p_" + nextId);
@@ -127,13 +141,14 @@ class IcebergMaintenanceTest {
         smallCommit(15, 115);
         assertEquals(6, dataFileCount(), "3 commits x 2 bands");
 
-        MaintenanceConfig config = new MaintenanceConfig(
-                1024 * 1024, 4, Long.MAX_VALUE, 100);
+        Map<String, String> settings = inert();
+        settings.put("rewrite_target_bytes", String.valueOf(1024 * 1024));
+        settings.put("rewrite_min_input_files", "4");
         MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
-                .run(config, Long.MAX_VALUE, props());
+                .run(plan(settings, Long.MAX_VALUE), props());
 
-        assertEquals(6, result.rewrittenFiles());
-        assertEquals(2, result.addedFiles(), "one packed file per partition");
+        assertEquals(6, result.counter("rewritten_files"));
+        assertEquals(2, result.counter("added_files"), "one packed file per partition");
         assertEquals(2, dataFileCount());
         assertEquals(6, rowCount(), "bin-pack must not change the data");
     }
@@ -141,11 +156,12 @@ class IcebergMaintenanceTest {
     @Test
     void binPackWaitsForTheMinInputThreshold() throws Exception {
         smallCommit(5, 105);
-        MaintenanceConfig config = new MaintenanceConfig(
-                1024 * 1024, 8, Long.MAX_VALUE, 100);
+        Map<String, String> settings = inert();
+        settings.put("rewrite_target_bytes", String.valueOf(1024 * 1024));
+        settings.put("rewrite_min_input_files", "8");
         MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
-                .run(config, Long.MAX_VALUE, props());
-        assertEquals(0, result.rewrittenFiles());
+                .run(plan(settings, Long.MAX_VALUE), props());
+        assertEquals(0, result.counter("rewritten_files"));
         assertEquals(2, dataFileCount());
     }
 
@@ -156,19 +172,20 @@ class IcebergMaintenanceTest {
         smallCommit(15);
         assertEquals(3, snapshotCount());
 
-        // Pin at sequence 1 (the first commit): nothing may expire.
-        MaintenanceConfig aggressive = new MaintenanceConfig(1, 1000, 0, 1);
+        Map<String, String> aggressive = inert();
+        aggressive.put("snapshot_retention_hours", "0");
+        aggressive.put("snapshot_min_retained", "1");
+
         MaintenanceResult gated = new IcebergMaintenance(tables.load(ref))
-                .run(aggressive, 1, props());
-        assertEquals(0, gated.expiredSnapshots());
+                .run(plan(aggressive, 1), props());
+        assertEquals(0, gated.counter("expired_snapshots"));
         assertEquals(3, snapshotCount());
 
-        // Pin at the latest sequence: older snapshots go, the pinned one stays.
         Table table = tables.load(ref);
         long latestSeq = table.currentSnapshot().sequenceNumber();
         MaintenanceResult expired = new IcebergMaintenance(table)
-                .run(aggressive, latestSeq, props());
-        assertEquals(2, expired.expiredSnapshots());
+                .run(plan(aggressive, latestSeq), props());
+        assertEquals(2, expired.counter("expired_snapshots"));
         assertEquals(1, snapshotCount());
         assertEquals(3, rowCount(), "the retained snapshot still reads fully");
     }
@@ -177,19 +194,158 @@ class IcebergMaintenanceTest {
     void filesWithEqualityDeletesAreLeftForTheMergePath() throws Exception {
         smallCommit(5);
         smallCommit(10);
-        // A tombstone attaches an equality delete to partition 0.
+        tombstone(1L, 5L);
+
+        Map<String, String> settings = inert();
+        settings.put("rewrite_target_bytes", String.valueOf(1024 * 1024));
+        settings.put("rewrite_min_input_files", "2");
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(plan(settings, Long.MAX_VALUE), props());
+        assertEquals(0, result.counter("rewritten_files"),
+                "files under equality deletes must not be bin-packed");
+        assertEquals(1, rowCount());
+        assertTrue(result.counter("expired_snapshots") == 0);
+    }
+
+    @Test
+    void deleteCompactionAppliesDeletesAndDropsDeleteFiles() throws Exception {
+        smallCommit(5, 105);
+        smallCommit(10);
+        tombstone(1L, 5L);
+        assertEquals(1, deleteFileCount());
+        assertEquals(2, rowCount());
+
+        Map<String, String> settings = inert();
+        settings.put("delete_compaction_min_deletes", "1");
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(plan(settings, Long.MAX_VALUE), props());
+
+        assertEquals(1, result.counter("delete_compacted_files"));
+        assertEquals(1, result.counter("removed_delete_files"));
+        assertEquals(0, deleteFileCount(), "the delete debt is gone");
+        assertEquals(2, rowCount(), "surviving rows are intact");
+        assertEquals(2, dataFileCount(), "the fully-deleted file has no replacement");
+    }
+
+    @Test
+    void deleteCompactionDroppingEveryRowLeavesNoReplacementFile() throws Exception {
+        smallCommit(5);
+        tombstone(1L, 5L);
+        assertEquals(0, rowCount(), "the tombstone removed the file's only row");
+
+        Map<String, String> settings = inert();
+        settings.put("delete_compaction_min_deletes", "1");
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(plan(settings, Long.MAX_VALUE), props());
+
+        assertEquals(1, result.counter("delete_compacted_files"));
+        assertEquals(0, deleteFileCount());
+        assertEquals(0, rowCount());
+        assertEquals(0, dataFileCount());
+    }
+
+    @Test
+    void manifestRewriteFoldsTheManifestList() throws Exception {
+        smallCommit(5);
+        smallCommit(10);
+        smallCommit(15);
+
+        Map<String, String> settings = inert();
+        settings.put("manifest_rewrite_min_manifests", "2");
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(plan(settings, Long.MAX_VALUE), props());
+
+        assertTrue(result.counter("rewritten_manifests") >= 2);
+        Table table = tables.load(ref);
+        assertEquals(1, table.currentSnapshot().allManifests(table.io()).size());
+        assertEquals(3, rowCount());
+    }
+
+    @Test
+    void orphanSweepDeletesUnreferencedFilesButNeverProtectedOnes() throws Exception {
+        smallCommit(5);
+        Table table = tables.load(ref);
+        String dataDir = table.location() + "/data";
+        java.nio.file.Path orphan = Path.of(dataDir.replace("file:", ""), "orphan.parquet");
+        java.nio.file.Path staged = Path.of(dataDir.replace("file:", ""), "staged.parquet");
+        java.nio.file.Files.createDirectories(orphan.getParent());
+        java.nio.file.Files.writeString(orphan, "never committed");
+        java.nio.file.Files.writeString(staged, "awaiting adoption");
+
+        Map<String, String> settings = inert();
+        settings.put("orphan_sweep_enabled", "true");
+        settings.put("orphan_grace_hours", "0");
+        MaintenanceResult result = new IcebergMaintenance(table).run(
+                new MaintenancePlan(settings, Long.MAX_VALUE,
+                        List.of(staged.toString())),
+                props());
+
+        assertEquals(1, result.counter("orphan_files_deleted"));
+        assertTrue(java.nio.file.Files.notExists(orphan), "the orphan is gone");
+        assertTrue(java.nio.file.Files.exists(staged), "protected files survive");
+        assertEquals(1, rowCount(), "committed data is untouched");
+    }
+
+    @Test
+    void disabledPassesRunNothingEvenWithAggressiveThresholds() throws Exception {
+        smallCommit(5);
+        smallCommit(10);
+        tombstone(1L, 5L);
+        int filesBefore = dataFileCount();
+        int snapshotsBefore = snapshotCount();
+
+        Map<String, String> settings = new HashMap<>();
+        settings.put("rewrite_enabled", "false");
+        settings.put("rewrite_target_bytes", String.valueOf(1024 * 1024));
+        settings.put("rewrite_min_input_files", "1");
+        settings.put("delete_compaction_enabled", "false");
+        settings.put("delete_compaction_min_deletes", "1");
+        settings.put("manifest_rewrite_enabled", "false");
+        settings.put("manifest_rewrite_min_manifests", "1");
+        settings.put("snapshot_expiry_enabled", "false");
+        settings.put("snapshot_retention_hours", "0");
+        settings.put("snapshot_min_retained", "1");
+        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
+                .run(plan(settings, Long.MAX_VALUE), props());
+
+        assertTrue(result.isNoop());
+        assertEquals(filesBefore, dataFileCount());
+        assertEquals(snapshotsBefore, snapshotCount());
+        assertEquals(1, deleteFileCount(), "the delete debt is untouched");
+    }
+
+    @Test
+    void orphanSweepIsOffByDefault() throws Exception {
+        smallCommit(5);
+        Table table = tables.load(ref);
+        java.nio.file.Path orphan = Path.of(
+                table.location().replace("file:", ""), "data", "orphan.parquet");
+        java.nio.file.Files.createDirectories(orphan.getParent());
+        java.nio.file.Files.writeString(orphan, "never committed");
+
+        MaintenanceResult result = new IcebergMaintenance(table)
+                .run(plan(inert(), Long.MAX_VALUE), props());
+
+        assertEquals(0, result.counter("orphan_files_deleted"));
+        assertTrue(java.nio.file.Files.exists(orphan));
+    }
+
+    private void tombstone(long id, long tierKey) throws Exception {
         io.modak.common.DeltaRowsBatch delta = new io.modak.common.DeltaRowsBatch(
                 TABLE, List.of("id"), COLUMNS, List.of(
-                        new io.modak.common.DeltaRowsBatch.Entry("1", true, 5L, 1,
-                                new Object[] {1L, 5L, null})));
+                        new io.modak.common.DeltaRowsBatch.Entry(String.valueOf(id), true,
+                                tierKey, 1, new Object[] {id, tierKey, null})));
         new IcebergMergeWriter(tables.load(ref)).applyDelta(delta, props());
+    }
 
-        MaintenanceConfig config = new MaintenanceConfig(1024 * 1024, 2, Long.MAX_VALUE, 100);
-        MaintenanceResult result = new IcebergMaintenance(tables.load(ref))
-                .run(config, Long.MAX_VALUE, props());
-        assertEquals(0, result.rewrittenFiles(),
-                "files under equality deletes must not be rewritten");
-        assertEquals(1, rowCount());
-        assertTrue(result.expiredSnapshots() == 0);
+    private int deleteFileCount() throws Exception {
+        Table table = tables.load(ref);
+        java.util.Set<String> paths = new java.util.HashSet<>();
+        try (CloseableIterable<FileScanTask> tasks = table.newScan().planFiles()) {
+            for (FileScanTask task : tasks) {
+                task.deletes().forEach(d -> paths.add(d.path().toString()));
+            }
+        }
+        return paths.size();
     }
 }

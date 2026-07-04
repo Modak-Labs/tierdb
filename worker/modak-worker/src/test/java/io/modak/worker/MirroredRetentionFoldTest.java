@@ -1,5 +1,8 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorRetention;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -114,15 +117,14 @@ class MirroredRetentionFoldTest {
         pump.setDaemon(true);
         pump.start();
         try {
-            // p0 ([0,100)) ages out: hi=100 <= high water 250 - lag 100.
             exec("INSERT INTO public.readings VALUES (5, 'newest', 250)");
             awaitFrontierPast(currentWalLsn());
 
             MirrorRetention retention = new MirrorRetention(dataSource, catalog);
-            retention.run(meta); // records the eligibility LSN
+            retention.run(meta);
             exec("UPDATE public.readings SET val = 'still-hot' WHERE id = 4");
-            awaitFrontierPast(currentWalLsn()); // frontier passes the recorded LSN
-            retention.run(meta); // proof complete: drops the partition
+            awaitFrontierPast(currentWalLsn());
+            retention.run(meta);
 
             assertNull(queryOne("SELECT to_regclass('public.readings_p0')::text"),
                     "aged partition dropped from the heap");
@@ -131,8 +133,6 @@ class MirroredRetentionFoldTest {
             assertEquals(List.of("1|a|10", "2|b|20", "3|c|110", "4|still-hot|210",
                     "5|newest|250"), lakeRows(), "the lake still holds the dropped rows");
 
-            // Below-window corrections, as the router writes them: T=100 sends these
-            // to the delta because the heap rows are gone.
             exec("INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload) VALUES "
                     + "(" + table.oid() + ", '1', 0, 10, nextval('modak.delta_version'), "
                     + "'{\"id\":1,\"val\":\"corrected\",\"event_time\":10}'), "
@@ -144,7 +144,6 @@ class MirroredRetentionFoldTest {
                     "5|newest|250"), lakeRows(),
                     "upsert replaced the mirrored row, tombstone removed one");
 
-            // The pump still mirrors ongoing DML after a fold.
             exec("INSERT INTO public.readings VALUES (6, 'post-fold', 260)");
             awaitFrontierPast(currentWalLsn());
             assertEquals(List.of("1|corrected|10", "3|c|110", "4|still-hot|210",

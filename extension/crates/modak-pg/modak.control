@@ -1,4 +1,4 @@
-comment = 'Modak: Postgres as the bounded hot tier of a lakehouse-backed logical table'
+comment = 'Modak: tier-aware data federation between Postgres and Apache Iceberg'
 default_version = '@CARGO_VERSION@'
 module_pathname = '$libdir/modak'
 relocatable = false

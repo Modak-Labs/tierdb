@@ -19,7 +19,6 @@ public final class IcebergTableBootstrap {
 
     private IcebergTableBootstrap() {}
 
-    /** Creates the table when absent, returns its current metadata file location. */
     public static String createIfAbsent(IcebergTables tables, String ref,
             List<Column> columns, Set<String> requiredCols,
             String tierKeyCol, long partitionWidth) {

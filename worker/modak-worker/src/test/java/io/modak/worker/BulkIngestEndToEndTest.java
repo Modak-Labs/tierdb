@@ -1,5 +1,6 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.IngestOperation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,7 +21,7 @@ import io.modak.common.TierKey;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -105,7 +106,7 @@ class BulkIngestEndToEndTest {
         table = catalog.register(new TableRegistration(
                 relOid("public.events"), "public", "events", List.of("id"), "event_time",
                 "{\"unit\":\"range\",\"partition_width\":100}",
-                IcebergLakeStoragePlugin.IDENTIFIER, location, null,
+                IcebergLakeStoragePlugin.IDENTIFIER, location,
                 TableMode.TIERED, null, null, Optional.empty(), Optional.empty()));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
@@ -138,7 +139,7 @@ class BulkIngestEndToEndTest {
 
         long snapshotBefore = catalog.readCutline(table).snapshot().id();
         long advancedBefore = Long.parseLong(queryOne(
-                "SELECT count(*)::text FROM modak.tiering_log"
+                "SELECT count(*)::text FROM modak.op_log"
                         + " WHERE op_kind = 'ingest' AND phase = 'advanced'"));
         operation().ingest(catalog.get(table).orElseThrow(),
                 List.of(fileA, fileB));
@@ -150,7 +151,7 @@ class BulkIngestEndToEndTest {
         assertEquals(new TierKey(200), catalog.readCutline(table).t(), "T is untouched");
         assertEquals("0", queryOne("SELECT count(*)::text FROM modak.delta"));
         assertEquals(String.valueOf(advancedBefore + 1),
-                queryOne("SELECT count(*)::text FROM modak.tiering_log"
+                queryOne("SELECT count(*)::text FROM modak.op_log"
                         + " WHERE op_kind = 'ingest' AND phase = 'advanced'"));
     }
 
@@ -255,7 +256,7 @@ class BulkIngestEndToEndTest {
                 relOid("public.readings"), "public", "readings", List.of("id"), "event_time",
                 "{\"unit\":\"range\",\"partition_width\":100}",
                 IcebergLakeStoragePlugin.IDENTIFIER,
-                warehouse.resolve("readings_mirror").toString(), null,
+                warehouse.resolve("readings_mirror").toString(),
                 TableMode.MIRRORED, "pub_r", "slot_r", Optional.empty(), Optional.empty()));
         catalog.initCutline(mirrored, new TierKey(Long.MIN_VALUE), new LakeSnapshotId(0));
 
@@ -277,7 +278,7 @@ class BulkIngestEndToEndTest {
         TableId mirrored = catalog.register(new TableRegistration(
                 relOid("public.metrics"), "public", "metrics", List.of("id"), "event_time",
                 "{\"unit\":\"range\",\"partition_width\":100}",
-                IcebergLakeStoragePlugin.IDENTIFIER, location, null,
+                IcebergLakeStoragePlugin.IDENTIFIER, location,
                 TableMode.MIRRORED, "pub_m", "slot_m", Optional.of(100L), Optional.empty()));
         catalog.initCutline(mirrored, new TierKey(200), new LakeSnapshotId(0));
 

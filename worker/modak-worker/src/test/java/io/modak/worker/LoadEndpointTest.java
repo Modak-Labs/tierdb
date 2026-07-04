@@ -1,5 +1,8 @@
 package io.modak.worker;
 
+import io.modak.worker.http.LoadEndpoint;
+import io.modak.worker.http.Metrics;
+import io.modak.worker.http.MetricsServer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,7 +45,6 @@ class LoadEndpointTest {
         dataSource = postgres.getPostgresDatabase();
         CatalogSchema.apply(dataSource);
 
-        // Partitioned like a real tiered table: the primary key is logical.
         exec("CREATE TABLE public.events (id bigint NOT NULL, ts bigint NOT NULL, v text) "
                 + "PARTITION BY RANGE (ts)");
         exec("CREATE TABLE public.events_p0 PARTITION OF public.events "
@@ -52,7 +54,7 @@ class LoadEndpointTest {
         JdbcCatalog catalog = new JdbcCatalog(dataSource);
         var table = catalog.register(new TableRegistration(
                 42L, "public", "events", List.of("id"), "ts",
-                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events", null));
+                "{\"unit\":\"hour\"}", "iceberg", "warehouse.public.events"));
         catalog.initCutline(table, new TierKey(100), new LakeSnapshotId(1));
 
         WorkerConfig config = WorkerConfig.fromEnv(Map.of(
@@ -114,7 +116,6 @@ class LoadEndpointTest {
         assertEquals(1, queryLong("SELECT count(*) FROM public.events"),
                 "the replayed batch was not applied");
 
-        // Counters accumulate across tests, only presence is stable.
         String rendered = metrics.render();
         assertTrue(rendered.contains(
                 "modak_load_total{table=\"public.events\",state=\"committed\"}"), rendered);

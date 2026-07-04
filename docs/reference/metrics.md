@@ -27,12 +27,20 @@ identically.
 | `modak_load_staged_labels{table}` | Staged loads awaiting adoption into Iceberg |
 | `modak_load_adoption_lag_seconds{table}` | Age of the oldest staged load (growth = adoption blocked) |
 
+## Lake health
+
+One gauge per counter the format plugin reports into `modak.lake_stats`,
+republished as `modak_lake_<counter>{table}`. The counter names are
+format-owned. Iceberg reports `files`, `delete_files`, `bytes`, `records`,
+`snapshots`, `manifests`, and `delete_ratio`. `modak_lake_warnings{table}` is
+the number of active health warnings, alert on it being nonzero.
+
 ## Per replication slot
 
 | Metric | Meaning |
 |--------|---------|
 | `modak_slot_active{slot}` | Whether a consumer currently streams the slot |
-| `modak_slot_retained_wal_bytes{slot}` | WAL pinned by the slot. Alert on growth, see the [WAL guard](../guides/operations.md#slot-wal-retention-guard) |
+| `modak_slot_retained_wal_bytes{slot}` | WAL pinned by the slot. Alert on growth, see the [WAL guard](../operations/day-2.md#slot-wal-retention-guard) |
 
 ## Housekeeping
 

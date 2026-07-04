@@ -26,7 +26,6 @@ final class BatchRouter {
 
     private BatchRouter() {}
 
-    /** With {@code spoolAvailable} false, cold volume stays in delta. */
     static Routed route(List<Map<String, Object>> rows, SeamState state,
             boolean spoolAvailable, int spoolThreshold) {
         List<Map<String, Object>> hot = new ArrayList<>();

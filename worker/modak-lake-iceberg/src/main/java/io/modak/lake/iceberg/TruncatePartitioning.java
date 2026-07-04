@@ -54,10 +54,6 @@ final class TruncatePartitioning {
         return sourceColumn;
     }
 
-    /**
-     * The partition key holding the given tier key, or {@code null} when the
-     * table is unpartitioned (Iceberg's own convention for writer APIs).
-     */
     PartitionKey keyOf(long tierKey) {
         if (!partitioned()) {
             return null;
@@ -69,10 +65,6 @@ final class TruncatePartitioning {
         return key;
     }
 
-    /**
-     * The partition path for a file spanning {@code [lo, hi]}, which must lie
-     * in one bucket. A straddling file is rejected with the offending path named.
-     */
     String singleBucketPath(long lo, long hi, String path) {
         long bucket = Math.floorDiv(lo, width) * width;
         if (Math.floorDiv(hi, width) * width != bucket) {

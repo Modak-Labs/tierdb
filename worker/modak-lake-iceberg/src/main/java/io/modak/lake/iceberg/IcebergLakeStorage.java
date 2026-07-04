@@ -2,11 +2,11 @@ package io.modak.lake.iceberg;
 
 import io.modak.common.RowBatchData.Column;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.CommitterInitContext;
+import io.modak.lake.commit.CommitterInitContext;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTable;
-import io.modak.lake.LakeTieringFactory;
+import io.modak.lake.commit.LakeTieringFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,12 +34,10 @@ public final class IcebergLakeStorage implements LakeStorage {
         return config;
     }
 
-    /** The warehouse-scoped Hadoop configuration (local FS or S3-compatible). */
     public Configuration hadoopConf() {
         return conf;
     }
 
-    /** The table resolver (path-based or REST catalog, per config). */
     public IcebergTables tables() {
         return tables;
     }

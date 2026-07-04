@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;

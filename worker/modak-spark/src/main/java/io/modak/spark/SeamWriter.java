@@ -16,12 +16,9 @@ import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.functions;
 
 /**
- * Routed inserts: rows at or above the cut-line go to the heap, rows below it
- * become {@code op = 0} delta rows for the worker to fold into the lake, and
- * rows below the retention line are rejected (expired from the lake). The same
- * split covers every mode: a fully mirrored table keeps T at its minimum so
- * everything is heap, and heap retention raises T to the drop boundary. No pin
- * is needed because T only moves up and the worker owns all lake commits.
+ * Routed inserts: rows at or above the cut-line go to the heap, rows
+ * below it become {@code op = 0} delta rows, and rows below the
+ * retention line are rejected.
  */
 final class SeamWriter {
 

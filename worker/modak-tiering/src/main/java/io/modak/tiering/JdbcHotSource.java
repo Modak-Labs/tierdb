@@ -21,8 +21,6 @@ import javax.sql.DataSource;
 /**
  * {@link HotSource} over JDBC. {@code PartitionId.id()} is the physical child
  * relation of a range-partitioned table, reads select from it, reclaim DROPs it.
- * Reads re-apply the tier-key bounds so a mis-registered partition row can never
- * leak rows across the cut-line.
  */
 public final class JdbcHotSource implements HotSource {
 
@@ -58,8 +56,30 @@ public final class JdbcHotSource implements HotSource {
     }
 
     @Override
+    public void attachColdMirror(RegisteredTable table, PartitionId partition) {
+        String qualified = ident(table.schemaName()) + "." + ident(partition.id());
+        try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+            try (ResultSet rs = s.executeQuery(
+                    "SELECT to_regprocedure('modak_attach_cold_mirror(oid, oid)') IS NOT NULL")) {
+                if (!rs.next() || !rs.getBoolean(1)) {
+                    throw new TieringException("keep-heap table " + table.schemaName() + "."
+                            + table.tableName() + " needs the modak extension: without the "
+                            + "cold-mirror trigger, plain DML below the cut-line would "
+                            + "silently diverge from the lake");
+                }
+            }
+            try (ResultSet rs = s.executeQuery("SELECT modak_attach_cold_mirror("
+                    + table.id().oid() + "::oid, '" + qualified.replace("'", "''")
+                    + "'::regclass::oid)")) {
+                rs.next();
+            }
+        } catch (SQLException e) {
+            throw new TieringException("failed to attach the cold mirror on " + partition, e);
+        }
+    }
+
+    @Override
     public void dropPartition(RegisteredTable table, PartitionId partition) {
-        // IF EXISTS keeps reclaim idempotent across crashes.
         String sql = "DROP TABLE IF EXISTS " + ident(table.schemaName()) + "." + ident(partition.id());
         try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
             s.execute(sql);

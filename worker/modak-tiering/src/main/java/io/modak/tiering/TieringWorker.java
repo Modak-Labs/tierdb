@@ -12,15 +12,17 @@ import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
-import io.modak.lake.CommittedLakeSnapshot;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitResult;
-import io.modak.lake.LakeCommitter;
 import io.modak.lake.LakeStorage;
-import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.LakeTieringProps;
-import io.modak.lake.LakeWriter;
-import io.modak.lake.WriterInitContext;
+import io.modak.lake.commit.CommittedLakeSnapshot;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitResult;
+import io.modak.lake.commit.LakeCommitter;
+import io.modak.lake.commit.LakeTieringFactory;
+import io.modak.lake.commit.LakeTieringProps;
+import io.modak.lake.commit.LakeWriter;
+import io.modak.lake.commit.WriterInitContext;
+import io.modak.tiering.policy.EvictionPolicy;
+import io.modak.tiering.policy.TieringPolicy;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -32,10 +34,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * The aging-down loop. Resume, seal, flush, commit ONE lake snapshot per batch,
- * advance {@code (T, S, lake_props)} atomically, reclaim below the pinned-reader
- * horizon. The lake commit is the point of no return. Before it a crash abandons
- * the op, after it resume completes the advance from the snapshot's own stamps.
+ * The aging-down loop. Resume, seal, flush, commit ONE lake snapshot per
+ * batch, advance {@code (T, S, lake_props)} atomically, reclaim below the
+ * pinned-reader horizon.
  */
 public final class TieringWorker {
 
@@ -79,6 +80,9 @@ public final class TieringWorker {
 
         for (PartitionInfo p : parts) {
             ensureTiering(p);
+            if (meta.keepHeap()) {
+                hotSource.attachColdMirror(meta, p.id());
+            }
         }
 
         LakeTieringFactory<?, ?> factory = lake.tieringFactory();
@@ -86,7 +90,6 @@ public final class TieringWorker {
         LakeCommitResult result = flushAndCommit(factory, meta, parts, opId, newT, rowsByPartition);
 
         if (result == null) {
-            // Empty flush: T must still advance or the policy re-selects these partitions forever.
             catalog.advanceCutline(table, newT, catalog.readCutline(table).snapshot(), Map.of());
             catalog.logOpPhase(opId, table, OpKind.TIERING,
                     OpPhase.ADVANCED, null, null);
@@ -124,8 +127,6 @@ public final class TieringWorker {
             try (LakeCommitter<W, C> committer =
                     factory.createCommitter(new CommitterInitContext(table, meta.lakeTableRef()))) {
                 C committable = committer.toCommittable(results);
-                // A lake snapshot the catalog doesn't know would be duplicated by
-                // committing on top: backfill from its stamps, abort, re-tier next cycle.
                 Optional<CommittedLakeSnapshot> missing =
                         committer.getMissingLakeSnapshot(catalog.readCutline(table).snapshot());
                 if (missing.isPresent() && belongsTo(table, missing.get().snapshotProps())) {
@@ -163,7 +164,6 @@ public final class TieringWorker {
         return props;
     }
 
-    // A stamped mismatch means a previous incarnation of a dropped+re-registered table.
     private static boolean belongsTo(TableId table, Map<String, String> snapshotProps) {
         String stamped = snapshotProps.get(LakeTieringProps.TABLE_ID);
         return stamped == null || stamped.equals(Long.toString(table.oid()));
@@ -205,7 +205,6 @@ public final class TieringWorker {
                 OpPhase.ADVANCED, found.readable(), null);
     }
 
-    // Realigns the catalog with an unknown lake snapshot from its stamped properties alone.
     private void advanceFromSnapshot(RegisteredTable meta, CommittedLakeSnapshot found) {
         TableId table = meta.id();
         String stampedT = found.snapshotProps().get(LakeTieringProps.NEW_TIER_KEY_HI);
@@ -218,7 +217,6 @@ public final class TieringWorker {
 
         catalog.advanceCutline(table, newT, found.readable(), found.publishProps());
 
-        // The op's partitions are exactly those wholly below the new T and mid-flight.
         for (PartitionInfo p : catalog.listPartitions(table)) {
             if (p.bounds().hi().compareTo(newT) <= 0) {
                 if (p.state() == PartitionState.SEALING) {
@@ -232,6 +230,9 @@ public final class TieringWorker {
     }
 
     private void reclaim(RegisteredTable meta) {
+        if (meta.keepHeap()) {
+            return;
+        }
         try {
             Cutline horizon = catalog.readHorizon(meta.id());
             List<PartitionInfo> parts = new ArrayList<>(catalog.listPartitions(meta.id()));
@@ -249,7 +250,6 @@ public final class TieringWorker {
         }
     }
 
-    // A gap-free batch guarantees advancing T strands no hot row below the new cut-line.
     private List<PartitionInfo> orderedContiguousBatch(TableId table, List<PartitionId> selected,
             TierKey currentT) {
         Map<PartitionId, PartitionInfo> byId = new HashMap<>();

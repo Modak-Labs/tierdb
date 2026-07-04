@@ -19,6 +19,24 @@
   --modak-line: #e0e0e0;
 }
 
+[data-md-color-scheme="default"] {
+  --md-mermaid-font-family: Inter, sans-serif;
+  --md-mermaid-node-bg-color: var(--modak-surface);
+  --md-mermaid-node-fg-color: #1a1a1a;
+  --md-mermaid-edge-color: #666666;
+  --md-mermaid-label-bg-color: #ffffff;
+  --md-mermaid-label-fg-color: #1a1a1a;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-mermaid-font-family: Inter, sans-serif;
+  --md-mermaid-node-bg-color: #181818;
+  --md-mermaid-node-fg-color: #e6e6e6;
+  --md-mermaid-edge-color: #999999;
+  --md-mermaid-label-bg-color: #141414;
+  --md-mermaid-label-fg-color: #e6e6e6;
+}
+
 [data-md-color-scheme="default"] .md-header__button.md-logo img {
   filter: invert(1);
 }

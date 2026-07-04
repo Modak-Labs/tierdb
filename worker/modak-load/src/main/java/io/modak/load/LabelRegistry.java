@@ -18,7 +18,6 @@ final class LabelRegistry {
 
     private LabelRegistry() {}
 
-    /** False when another transaction holds this {@code (table, label)} right now. */
     static boolean tryLock(Connection c, long tableId, String label) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
                 "SELECT pg_try_advisory_xact_lock(hashtextextended(?, ?))")) {
@@ -31,7 +30,6 @@ final class LabelRegistry {
         }
     }
 
-    /** False when the label already exists: a replay, the stored row is untouched. */
     static boolean insert(Connection c, long tableId, String label, LoadState state,
             String stagedFilesJson, String resultJson) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement("""

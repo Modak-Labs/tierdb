@@ -3,7 +3,6 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# EXAMPLE_REST=1 runs the same walkthrough against the Iceberg REST catalog stack.
 if [ "${EXAMPLE_REST:-0}" = "1" ]; then
     export COMPOSE_FILE=docker-compose.yml:docker-compose.rest.yml
 fi
@@ -17,7 +16,7 @@ fail() {
     exit 1
 }
 
-assert_eq() { # label expected actual
+assert_eq() {
     if [ "$2" != "$3" ]; then
         echo "EXAMPLE FAIL: $1" >&2
         echo "--- expected:" >&2; echo "$2" >&2
@@ -26,7 +25,7 @@ assert_eq() { # label expected actual
     fi
 }
 
-wait_for() { # label sql expected
+wait_for() {
     local label=$1 sql=$2 expected=$3
     for _ in $(seq 1 60); do
         if [ "$($PSQL -tA -c "$sql")" = "$expected" ]; then

@@ -12,11 +12,11 @@ import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
-import io.modak.lake.LakeCommitter;
-import io.modak.lake.LakeTieringProps;
-import io.modak.lake.LakeWriter;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.WriterInitContext;
+import io.modak.lake.commit.LakeCommitter;
+import io.modak.lake.commit.LakeTieringProps;
+import io.modak.lake.commit.LakeWriter;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.WriterInitContext;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -155,8 +155,6 @@ class IcebergPartitionedWriteTest {
                 new Object[] {1L, 5L, "a"},
                 new Object[] {2L, 105L, "b"}), 0, 200);
 
-        // id=1 moved from tier 5 to tier 105: the delete must land in the old
-        // partition or the original image survives as a duplicate.
         DeltaRowsBatch delta = new DeltaRowsBatch(TABLE, List.of("id"), COLUMNS, List.of(
                 new DeltaRowsBatch.Entry("1", false, 105L, 5L, 1,
                         new Object[] {1L, 105L, "moved"})));

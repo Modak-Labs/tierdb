@@ -27,7 +27,7 @@ A conforming pinned read of one table:
 
     SELECT lake_props->>'metadata_location' AS metadata_location,
            lake_props->>'snapshot_id'       AS snapshot_id
-      FROM modak.tables WHERE table_id = :table_oid;
+      FROM modak.cutline WHERE table_id = :table_oid;
     ```
 
     Doing the insert and the read in one transaction is what makes the pin
@@ -36,7 +36,8 @@ A conforming pinned read of one table:
 
 2. Scan the hot branch: the Postgres table with `tier_key >= T`.
 
-3. Scan the cold branch pinned at S. `lake_props` carries two equivalent
+3. Scan the cold branch pinned at S. `lake_props` sits on the cut-line row and
+   carries two equivalent
    handles, published atomically with every advance: `metadata_location` for
    engines that scan a metadata file directly (DuckDB `iceberg_scan`), and
    `snapshot_id` for engines that pin through a catalog (Trino
@@ -109,7 +110,7 @@ Consumers should check the version they were written against.
 
 Today there are two. The `modak` Postgres extension is the reference
 consumer, running this protocol inside the planner hook with
-transaction-scoped pins plus write-side routing. [Spark](../connectors/spark.md)
-is the first of the [connectors](../connectors/index.md), which share the
+transaction-scoped pins plus write-side routing. [Spark](../integrations/spark.md)
+is the first of the [connectors](../integrations/index.md), which share the
 protocol layer in `modak-connector`. Each consumer is a thin client of this
 page, not a fork of the engine.

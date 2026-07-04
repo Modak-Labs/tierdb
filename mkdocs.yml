@@ -51,7 +51,11 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: false
   - pymdownx.inlinehilite
@@ -63,20 +67,27 @@ nav:
       - Quickstart: getting-started/quickstart.md
       - Installation: getting-started/installation.md
       - Concepts: getting-started/concepts.md
-      - The contract: getting-started/contract.md
-  - Guides:
-      - Registering tables: guides/registering-tables.md
-      - Reading: guides/reading.md
-      - Corrections & schema changes: guides/corrections.md
-      - Bulk ingestion: guides/bulk-ingestion.md
-      - Stream load: guides/stream-load.md
-      - Production deployment: guides/production.md
-      - Deploying on AWS: guides/aws.md
-      - Operations: guides/operations.md
-      - Console: guides/console.md
-  - Connectors:
-      - Overview: connectors/index.md
-      - Spark: connectors/spark.md
+      - Architecture: getting-started/architecture.md
+  - Modes:
+      - Choosing a mode: modes/choosing.md
+      - The contract: modes/contract.md
+  - Working with tables:
+      - Registering tables: tables/registering-tables.md
+      - Storage profiles: tables/storage-profiles.md
+      - Reading: tables/reading.md
+      - Corrections & schema changes: tables/corrections.md
+  - Ingestion:
+      - Bulk ingestion: ingestion/bulk-ingestion.md
+      - Stream load: ingestion/stream-load.md
+  - Integrations:
+      - Overview: integrations/index.md
+      - Spark: integrations/spark.md
+  - Operations:
+      - Production deployment: operations/production.md
+      - Deploying on AWS: operations/aws.md
+      - Day-2 operations: operations/day-2.md
+      - Lake maintenance: operations/lake-maintenance.md
+      - Console: operations/console.md
   - Reference:
       - SQL API: reference/sql.md
       - CLI: reference/cli.md
@@ -84,4 +95,3 @@ nav:
       - Catalog schema: reference/catalog.md
       - Seam protocol: reference/seam.md
       - Metrics: reference/metrics.md
-  - Architecture: architecture.md

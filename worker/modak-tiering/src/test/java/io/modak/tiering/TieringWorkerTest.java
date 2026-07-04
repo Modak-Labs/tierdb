@@ -1,6 +1,7 @@
 package io.modak.tiering;
 
 import io.modak.common.OpKind;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,7 +48,7 @@ class TieringWorkerTest {
         hotSource = new FakeHotSource();
         table = catalog.register(new TableRegistration(
                 42L, "public", "events", List.of("id"), "event_time",
-                "{\"unit\":\"hour\"}", "fake", "/fake/events", null));
+                "{\"unit\":\"hour\"}", "fake", "/fake/events"));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
         p0 = partition("events_p0", 0, 100);
@@ -68,7 +69,11 @@ class TieringWorkerTest {
     }
 
     private PartitionState stateOf(PartitionId id) {
-        return catalog.listPartitions(table).stream()
+        return stateOf(table, id);
+    }
+
+    private PartitionState stateOf(TableId owner, PartitionId id) {
+        return catalog.listPartitions(owner).stream()
                 .filter(p -> p.id().equals(id)).findFirst().orElseThrow().state();
     }
 
@@ -79,14 +84,14 @@ class TieringWorkerTest {
 
         assertEquals(1, lake.snapshots.size());
         var snap = lake.snapshots.get(0);
-        assertEquals("200", snap.props().get(io.modak.lake.LakeTieringProps.NEW_TIER_KEY_HI));
+        assertEquals("200", snap.props().get(io.modak.lake.commit.LakeTieringProps.NEW_TIER_KEY_HI));
         assertEquals(io.modak.common.OpKind.TIERING.commitUser(),
-                snap.props().get(io.modak.lake.LakeTieringProps.COMMIT_USER),
+                snap.props().get(io.modak.lake.commit.LakeTieringProps.COMMIT_USER),
                 "ecosystem-standard commit-user stamp");
         assertEquals(3, lake.allRows().size(), "both partitions' rows in the one commit");
 
         assertEquals(new Cutline(new TierKey(200), new LakeSnapshotId(1)), catalog.readCutline(table));
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("metadata_location"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("metadata_location"));
 
         assertEquals(List.of(p0, p1), hotSource.dropped);
         assertEquals(PartitionState.DROPPED, stateOf(p0));
@@ -150,19 +155,18 @@ class TieringWorkerTest {
         assertEquals(1, lake.snapshots.size(), "no second commit of the same data");
         assertEquals(writersBefore, lake.writersCreated, "no re-flush either");
         assertEquals(new Cutline(new TierKey(100), new LakeSnapshotId(1)), catalog.readCutline(table));
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("metadata_location"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("metadata_location"));
         assertTrue(catalog.findIncompleteOps(table, OpKind.TIERING).isEmpty());
         assertEquals(PartitionState.DROPPED, stateOf(p0), "and reclaim proceeds");
     }
 
     @Test
     void catalogBehindTheLakeIsBackfilledAndTheCommitAborted() {
-        // A tiering snapshot (p0, T=100) the catalog never learned about, unclaimed by any op.
         lake.seedSnapshot(java.util.Map.of(
-                io.modak.lake.LakeTieringProps.OP_ID, java.util.UUID.randomUUID().toString(),
-                io.modak.lake.LakeTieringProps.OP_KIND, io.modak.common.OpKind.TIERING.sql(),
-                io.modak.lake.LakeTieringProps.NEW_TIER_KEY_HI, "100",
-                io.modak.lake.LakeTieringProps.TABLE_ID, "42"),
+                io.modak.lake.commit.LakeTieringProps.OP_ID, java.util.UUID.randomUUID().toString(),
+                io.modak.lake.commit.LakeTieringProps.OP_KIND, io.modak.common.OpKind.TIERING.sql(),
+                io.modak.lake.commit.LakeTieringProps.NEW_TIER_KEY_HI, "100",
+                io.modak.lake.commit.LakeTieringProps.TABLE_ID, "42"),
                 List.<Object[]>of(new Object[] {1L, 10L, "a"}, new Object[] {2L, 20L, "b"}));
 
         selected = List.of(p0, p1);
@@ -186,12 +190,11 @@ class TieringWorkerTest {
 
     @Test
     void foreignIncarnationSnapshotNeverAdvancesThisTable() {
-        // Same location, different stamped table_id: a dropped + re-registered incarnation.
         lake.seedSnapshot(java.util.Map.of(
-                io.modak.lake.LakeTieringProps.OP_ID, java.util.UUID.randomUUID().toString(),
-                io.modak.lake.LakeTieringProps.OP_KIND, io.modak.common.OpKind.TIERING.sql(),
-                io.modak.lake.LakeTieringProps.NEW_TIER_KEY_HI, "100",
-                io.modak.lake.LakeTieringProps.TABLE_ID, "999"),
+                io.modak.lake.commit.LakeTieringProps.OP_ID, java.util.UUID.randomUUID().toString(),
+                io.modak.lake.commit.LakeTieringProps.OP_KIND, io.modak.common.OpKind.TIERING.sql(),
+                io.modak.lake.commit.LakeTieringProps.NEW_TIER_KEY_HI, "100",
+                io.modak.lake.commit.LakeTieringProps.TABLE_ID, "999"),
                 List.<Object[]>of(new Object[] {99L, 10L, "stale"}));
 
         selected = List.of(p0);
@@ -200,7 +203,7 @@ class TieringWorkerTest {
         assertEquals(0, lake.abortedCommittables, "foreign snapshot is ignored, not a conflict");
         assertEquals(2, lake.snapshots.size(), "our own commit lands on top");
         assertEquals(new Cutline(new TierKey(100), new LakeSnapshotId(2)), catalog.readCutline(table));
-        assertEquals("42", lake.snapshots.get(1).props().get(io.modak.lake.LakeTieringProps.TABLE_ID),
+        assertEquals("42", lake.snapshots.get(1).props().get(io.modak.lake.commit.LakeTieringProps.TABLE_ID),
                 "our commits carry the identity stamp");
         assertEquals(PartitionState.DROPPED, stateOf(p0));
     }
@@ -244,6 +247,34 @@ class TieringWorkerTest {
         selected = List.of();
         worker.runCycle(table, NOW);
         assertEquals(PartitionState.DROPPED, stateOf(p0), "DROP retries and succeeds");
+    }
+
+    @Test
+    void keepHeapTiersAndAdvancesButNeverDropsPartitions() {
+        TableId kh = catalog.register(new TableRegistration(
+                43L, "public", "readings", List.of("id"), "event_time",
+                "{\"unit\":\"hour\"}", "fake", "/fake/readings",
+                io.modak.catalog.TableMode.TIERED, null, null,
+                java.util.Optional.empty(), java.util.Optional.empty(), true));
+        catalog.initCutline(kh, new TierKey(0), new LakeSnapshotId(0));
+        PartitionId k0 = new PartitionId(kh, "readings_p0");
+        catalog.upsertPartition(k0, new PartitionBounds(new TierKey(0), new TierKey(100)),
+                PartitionState.HOT);
+        hotSource.seed(k0, new Object[] {1L, 10L, "a"});
+
+        selected = List.of(k0);
+        worker.runCycle(kh, NOW);
+
+        assertEquals(1, lake.snapshots.size());
+        assertEquals(new Cutline(new TierKey(100), new LakeSnapshotId(1)), catalog.readCutline(kh));
+        assertEquals(List.of(k0), hotSource.mirrored, "cold mirror attached before the copy");
+        assertTrue(hotSource.dropped.isEmpty(), "the heap keeps its copy");
+        assertEquals(PartitionState.TIERED, stateOf(kh, k0));
+
+        selected = List.of();
+        worker.runCycle(kh, NOW);
+        assertTrue(hotSource.dropped.isEmpty(), "later cycles never reclaim either");
+        assertEquals(PartitionState.TIERED, stateOf(kh, k0));
     }
 
     @Test

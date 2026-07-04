@@ -7,7 +7,7 @@ import io.modak.common.TableId;
 import java.util.Optional;
 import java.util.UUID;
 
-/** A row of {@code modak.tiering_log}: one op and the last phase it durably reached. */
+/** A row of {@code modak.op_log}: one op and the last phase it durably reached. */
 public record TieringOp(
         UUID opId,
         TableId table,

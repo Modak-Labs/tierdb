@@ -23,7 +23,6 @@ public record StagedFiles(List<String> files, long minTierKey, long maxTierKey) 
         return node.toString();
     }
 
-    /** Empty for a load that never spooled ({@code null} column). */
     public static Optional<StagedFiles> fromJson(String json) {
         if (json == null) {
             return Optional.empty();

@@ -16,10 +16,9 @@ import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.hadoop.HadoopTables;
 
 /**
- * Resolves {@code lake_table_ref} to an Iceberg {@link Table}: a warehouse path
- * ({@link HadoopTables}) by default, or a {@code namespace.table} REST-catalog
- * identifier when the config carries {@code catalog.uri}. {@code iceberg.catalog.*}
- * and {@code iceberg.table.*} config keys pass through verbatim.
+ * Resolves {@code lake_table_ref} to an Iceberg {@link Table}: a warehouse
+ * path ({@link HadoopTables}) by default, or a {@code namespace.table}
+ * REST-catalog identifier when the config carries {@code catalog.uri}.
  */
 public final class IcebergTables {
 
@@ -37,7 +36,11 @@ public final class IcebergTables {
     }
 
     public static IcebergTables from(Map<String, String> config, Configuration conf) {
-        Map<String, String> tableProps = prefixed(config, TABLE_PREFIX);
+        Map<String, String> tableProps = new HashMap<>();
+        tableProps.put("write.metadata.delete-after-commit.enabled", "true");
+        tableProps.put("write.metadata.previous-versions-max", "20");
+        tableProps.putAll(prefixed(config, TABLE_PREFIX));
+        tableProps = Map.copyOf(tableProps);
         String uri = config.get("catalog.uri");
         if (uri == null || uri.isBlank()) {
             return new IcebergTables(conf, null, tableProps);
@@ -45,8 +48,6 @@ public final class IcebergTables {
         Map<String, String> props = new HashMap<>();
         props.put(CatalogUtil.ICEBERG_CATALOG_TYPE, CatalogUtil.ICEBERG_CATALOG_TYPE_REST);
         props.put(CatalogProperties.URI, uri);
-        // IO goes through our Hadoop conf (s3a), not the server-suggested
-        // io-impl, the worker doesn't ship iceberg-aws.
         props.put(CatalogProperties.FILE_IO_IMPL,
                 config.getOrDefault("catalog.io-impl", "org.apache.iceberg.hadoop.HadoopFileIO"));
         putIfSet(props, CatalogProperties.WAREHOUSE_LOCATION, config.get("catalog.warehouse"));
@@ -76,7 +77,6 @@ public final class IcebergTables {
                 : catalog.loadTable(TableIdentifier.parse(ref));
     }
 
-    /** Creates the table when absent (both schemes are idempotent) and returns it. */
     public Table createIfAbsent(String ref, Schema schema, PartitionSpec spec) {
         if (catalog == null) {
             HadoopTables tables = new HadoopTables(conf);
@@ -96,7 +96,6 @@ public final class IcebergTables {
         }
     }
 
-    /** Drops the table with purge (data files deleted), absent is a no-op. */
     public void drop(String ref) {
         if (catalog == null) {
             HadoopTables tables = new HadoopTables(conf);

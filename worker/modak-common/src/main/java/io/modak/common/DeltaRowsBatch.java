@@ -26,7 +26,6 @@ public record DeltaRowsBatch(
             this(pk, tombstone, tierKey, null, version, row);
         }
 
-        /** The partition whose image the fold's equality delete must remove. */
         public long lakeTierKey() {
             return oldTierKey != null ? oldTierKey : tierKey;
         }

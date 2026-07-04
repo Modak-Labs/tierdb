@@ -62,7 +62,6 @@ class BatchRouterTest {
                 List.of(row(1, 150), row(2, 49)), seam(50L, false), true, 1000));
         assertTrue(e.getMessage().contains("retention line"), e.getMessage());
 
-        // At the line is fine: [R, T) is still correctable.
         var routed = BatchRouter.route(List.of(row(2, 50)), seam(50L, false), true, 1000);
         assertEquals(1, routed.coldDelta().size());
     }

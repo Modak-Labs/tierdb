@@ -13,7 +13,7 @@ does change it, Modak moves the row to where the new value says it belongs.
 
 ## Table modes
 
-Three variants, one axis: how much of the table Postgres holds.
+Four variants, one axis: how much of the table Postgres holds.
 
 A **tiered** table is `PARTITION BY RANGE` on the tier key. Postgres keeps only
 the recent partitions. The worker moves whole partitions behind the data
@@ -24,12 +24,19 @@ they fall `N` tier-key units behind the cut-line, so the table carries a
 bounded total history. Corrections to rows that already moved cold land in
 `modak.delta` instead of rewriting Iceberg.
 
+A **tiered keep-heap** table (`--keep-heap`) tiers the same way, minus the
+drop: partitions are copied into Iceberg in batches and the cut-line advances,
+but the heap keeps its full copy and stays writable with plain DML everywhere.
+A row trigger on tiered partitions mirrors every change into `modak.delta`, so
+seam reads and the lake fold see it. Full history in both stores without a
+replication slot, at the cost of Postgres never shrinking.
+
 A **fully mirrored** table is any table with a primary key. Postgres keeps the
 whole copy and takes plain DML, including writes into old data, and a
 logical-replication pump trails every change into an Iceberg mirror. Nothing
 routes and nothing needs the delta. The lake is a trailing full copy for
 analytics engines. Reads default to the plain heap, with an opt-in
-[hybrid mode](../guides/reading.md#mirrored-tables-heap-or-hybrid) that serves
+[hybrid mode](../tables/reading.md#mirrored-tables-heap-or-hybrid) that serves
 the bulk of a scan from the lake once the mirror provably covers it.
 
 A **mirrored table with heap retention** (`--heap-retention N`) is the middle
@@ -70,7 +77,7 @@ cycle, on mirrored tables with heap retention the mirror pump folds between
 replication batches. Fully mirrored tables never need the delta, since their
 corrections are plain heap DML that the pump replays. The delta is sized for
 corrections, not volume: bulk historical loads go through
-[bulk ingestion](../guides/bulk-ingestion.md) instead.
+[bulk ingestion](../ingestion/bulk-ingestion.md) instead.
 
 ## How a read works
 
@@ -84,4 +91,4 @@ recent (heap, tier_key >= T)  ⊕  cold-merge (Iceberg @ S, delta)
 executed by DuckDB via `pg_duckdb`, under a read pin on `(T, S)`. The result is
 one consistent point-in-time view of the whole table, no matter what tiering,
 mirroring, or compaction are doing concurrently. Details and knobs:
-[Reading](../guides/reading.md).
+[Reading](../tables/reading.md).

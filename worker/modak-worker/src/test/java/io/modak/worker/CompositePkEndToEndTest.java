@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -20,7 +22,7 @@ import io.modak.compaction.JdbcCompactionPolicy;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -49,10 +51,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Composite-PK variants of the two write paths that carry key identity into the
- * lake: the compaction fold (router-shaped delta entries with multi-column keys,
- * tombstone payloads carrying the pk fields) and the CDC mirror pump (canonical
- * joined keys, equality deletes over every pk column).
+ * Composite-PK variants of the two write paths that carry key identity
+ * into the lake: the compaction fold and the mirror pump.
  */
 class CompositePkEndToEndTest {
 
@@ -115,7 +115,7 @@ class CompositePkEndToEndTest {
         TableId table = catalog.register(new TableRegistration(
                 relOid("public.readings"), "public", "readings",
                 List.of("tenant_id", "device_id"), "event_time",
-                "{\"unit\":\"range\"}", IcebergLakeStoragePlugin.IDENTIFIER, location, null));
+                "{\"unit\":\"range\"}", IcebergLakeStoragePlugin.IDENTIFIER, location));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
         PartitionId p0 = new PartitionId(table, "readings_p0");
@@ -129,7 +129,6 @@ class CompositePkEndToEndTest {
         icebergTable.refresh();
         assertEquals(List.of("1|d1|10|a", "1|d2|20|b", "2|d1|110|c"), lakeRows(icebergTable));
 
-        // What the Rust router writes: joined pk, upsert = full row, tombstone = pk fields.
         exec("INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload) VALUES "
                 + "(" + table.oid() + ", '1' || chr(31) || 'd2', 0, 20, "
                 + "nextval('modak.delta_version'), "
@@ -178,7 +177,6 @@ class CompositePkEndToEndTest {
         pump.setDaemon(true);
         pump.start();
         try {
-            // Same vehicle_id, two tenants: only tenant 2 dies, only tenant 1 moves.
             exec("UPDATE public.locations SET lat = 9.0, updated_at = 210"
                     + " WHERE tenant_id = 1 AND vehicle_id = 'V1'");
             exec("DELETE FROM public.locations WHERE tenant_id = 2 AND vehicle_id = 'V1'");

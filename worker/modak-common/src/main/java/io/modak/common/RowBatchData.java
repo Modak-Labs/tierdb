@@ -20,12 +20,7 @@ public record RowBatchData(
         }
     }
 
-    /**
-     * Portable scalar vocabulary, anything beyond these is carried as text.
-     * Canonical values: LONG=Long, DOUBLE=Double, BOOLEAN=Boolean, TEXT=String,
-     * TIMESTAMP=OffsetDateTime (UTC), DATE=LocalDate, DECIMAL=BigDecimal,
-     * UUID=UUID, BINARY=byte[].
-     */
+    /** Portable scalar vocabulary, anything beyond these is carried as text. */
     public enum ColumnType { LONG, DOUBLE, BOOLEAN, TEXT, TIMESTAMP, DATE, DECIMAL, UUID, BINARY }
 
     public RowBatchData {

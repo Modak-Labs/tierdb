@@ -8,7 +8,6 @@ use pgrx::prelude::*;
 
 use crate::catalog::catalog_err;
 
-/// Fallback horizon TTL if a backend dies without releasing its pin.
 const DEFAULT_TTL_SECS: i64 = 3600;
 
 const ACQUIRE_SQL: &str = "INSERT INTO modak.read_pins \

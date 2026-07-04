@@ -13,14 +13,12 @@ fi
 
 docker rm -f modak-example-copy >/dev/null 2>&1 || true
 
-# unregister offboards everything: catalog rows, CDC plumbing, the lake table.
 for t in events vehicles telemetry; do
     docker compose run --rm worker unregister --table "public.$t" --drop-lake
 done
 $PSQL -c "DROP TABLE IF EXISTS public.events, public.vehicles, public.telemetry" >/dev/null
 
 if [ "${EXAMPLE_REST:-0}" = "1" ]; then
-    # The in-memory REST catalog desyncs from MinIO across restarts: wipe both.
     docker compose restart iceberg-rest >/dev/null
     docker compose run --rm --entrypoint /bin/sh minio-init -c \
         "mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null \

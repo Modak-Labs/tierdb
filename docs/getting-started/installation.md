@@ -74,6 +74,10 @@ SELECT duckdb.create_simple_secret(
 );
 ```
 
+Tables on additional warehouses (see
+[Storage profiles](../tables/storage-profiles.md)) each need a secret scoped
+to their warehouse root (`scope := 's3://analytics-lake/'`).
+
 ## Run the worker
 
 The worker is a plain jar pointed at your database and object store through
@@ -89,6 +93,6 @@ java -jar modak-worker.jar run
 ```
 
 It creates the `modak.*` catalog schema on first start. From here,
-[register a table](../guides/registering-tables.md) and you are running.
+[register a table](../tables/registering-tables.md) and you are running.
 For roles, TLS, WAL safety, and everything else a shared database needs, see
-[Production deployment](../guides/production.md).
+[Production deployment](../operations/production.md).

@@ -25,7 +25,6 @@ import javax.sql.DataSource;
  */
 public final class PartitionSync {
 
-    // pg_get_expr(relpartbound) yields FOR VALUES FROM ('0') TO ('100'), quotes optional.
     static final Pattern RANGE_BOUND =
             Pattern.compile("FOR VALUES FROM \\('?(-?\\d+)'?\\) TO \\('?(-?\\d+)'?\\)");
 
@@ -45,11 +44,6 @@ public final class PartitionSync {
         this.catalog = Objects.requireNonNull(catalog);
     }
 
-    /**
-     * Width ({@code hi - lo}) of the table's first PG range partition, the
-     * natural lake partition granularity for a tiered table. Empty when the
-     * table has no range partitions.
-     */
     public static java.util.OptionalLong firstRangeWidth(DataSource ds, String qualified) {
         try (Connection c = ds.getConnection();
                 PreparedStatement ps = c.prepareStatement(CHILDREN_SQL)) {
@@ -69,7 +63,6 @@ public final class PartitionSync {
         return java.util.OptionalLong.empty();
     }
 
-    /** Returns the number of newly registered partitions. */
     public int sync(RegisteredTable table) {
         Set<String> known = new HashSet<>();
         for (PartitionInfo p : catalog.listPartitions(table.id())) {
@@ -89,7 +82,7 @@ public final class PartitionSync {
                     }
                     Matcher m = RANGE_BOUND.matcher(rs.getString(2));
                     if (!m.find()) {
-                        continue; // DEFAULT / MINVALUE / MAXVALUE partitions are not tierable
+                        continue;
                     }
                     catalog.upsertPartition(
                             new PartitionId(table.id(), name),

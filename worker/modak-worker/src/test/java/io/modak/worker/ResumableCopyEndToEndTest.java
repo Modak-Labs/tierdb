@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,14 +15,14 @@ import io.modak.common.Lsn;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.TableId;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.CommitterInitContext;
+import io.modak.lake.commit.CommitterInitContext;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTable;
-import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.MaintenanceConfig;
-import io.modak.lake.MaintenanceResult;
-import io.modak.lake.MergeWriter;
+import io.modak.lake.commit.LakeTieringFactory;
+import io.modak.lake.maintain.MaintenancePlan;
+import io.modak.lake.maintain.MaintenanceResult;
+import io.modak.lake.commit.MergeWriter;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -94,7 +96,6 @@ class ResumableCopyEndToEndTest {
             "--mode", "mirrored", "--chunk-rows", "2",
         };
 
-        // "Crash" after the first chunk committed and journaled.
         assertThrows(Exception.class,
                 () -> TableRegistrar.run(config, args, new CrashingLake(realLake, 1)));
 
@@ -105,7 +106,6 @@ class ResumableCopyEndToEndTest {
         assertTrue(catalog.readMirrorFrontier(table).isEmpty(),
                 "no frontier until the copy lands, the daemon skips this table");
 
-        // Writes while down: one below the copied range (stream), one above (resumed chunks).
         exec("INSERT INTO public.readings VALUES (0, 'v0', 5)");
         exec("INSERT INTO public.readings VALUES (9, 'v9', 90)");
 
@@ -121,7 +121,6 @@ class ResumableCopyEndToEndTest {
                 lakeRows(),
                 "resume finished the copy from the last chunk without duplicating chunk 1");
 
-        // The below-range row arrives via the stream from the consistent point.
         RegisteredTable meta = catalog.get(table).orElseThrow();
         MirrorWorker worker = new MirrorWorker(catalog, realLake, meta,
                 MirrorWorker.Settings.fromConfig(config));
@@ -204,19 +203,19 @@ class ResumableCopyEndToEndTest {
             }
 
             @Override
-            public MaintenanceResult maintain(MaintenanceConfig config,
-                    LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
-                return inner.maintain(config, oldestPinnedSnapshot, snapshotProps);
+            public MaintenanceResult maintain(MaintenancePlan plan,
+                    Map<String, String> snapshotProps) {
+                return inner.maintain(plan, snapshotProps);
             }
 
             @Override
-            public io.modak.lake.LakeCommitResult expireBelow(long boundary,
+            public io.modak.lake.commit.LakeCommitResult expireBelow(long boundary,
                     Map<String, String> snapshotProps) {
                 return inner.expireBelow(boundary, snapshotProps);
             }
 
             @Override
-            public io.modak.lake.LakeCommitResult ingest(java.util.List<String> files,
+            public io.modak.lake.commit.LakeCommitResult ingest(java.util.List<String> files,
                     io.modak.lake.TierKeyWindow window, Map<String, String> snapshotProps) {
                 return inner.ingest(files, window, snapshotProps);
             }

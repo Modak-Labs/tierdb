@@ -1,16 +1,15 @@
 package io.modak.load;
 
-import io.modak.common.LakeSnapshotId;
 import io.modak.common.RowBatchData.Column;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitResult;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitResult;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTable;
-import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.MaintenanceConfig;
-import io.modak.lake.MaintenanceResult;
+import io.modak.lake.commit.LakeTieringFactory;
+import io.modak.lake.maintain.MaintenancePlan;
+import io.modak.lake.maintain.MaintenanceResult;
 import io.modak.lake.TierKeyWindow;
 import java.util.ArrayList;
 import java.util.List;
@@ -63,7 +62,7 @@ final class FakeLakeStorage implements LakeStorage, LakeTable {
     }
 
     @Override
-    public io.modak.lake.MergeWriter mergeWriter() {
+    public io.modak.lake.commit.MergeWriter mergeWriter() {
         throw new UnsupportedOperationException();
     }
 
@@ -73,8 +72,7 @@ final class FakeLakeStorage implements LakeStorage, LakeTable {
     }
 
     @Override
-    public MaintenanceResult maintain(MaintenanceConfig config,
-            LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
+    public MaintenanceResult maintain(MaintenancePlan plan, Map<String, String> snapshotProps) {
         throw new UnsupportedOperationException();
     }
 

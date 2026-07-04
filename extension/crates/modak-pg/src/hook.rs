@@ -1,7 +1,6 @@
 //! Transparent reads. A `planner_hook` turns each registered `RTE_RELATION`
 //! into an `RTE_SUBQUERY` holding the same union scan the explicit protocol
-//! runs, following Postgres' own view-expansion recipe. Read pins are
-//! transaction-scoped and roll back on abort, so a crashed client never leaks one.
+//! runs, following Postgres' own view-expansion recipe.
 
 use core::ffi::{c_char, c_int, c_void};
 use std::cell::Cell;
@@ -20,41 +19,25 @@ use crate::catalog::PgCatalog;
 use crate::pin::PgReadPins;
 use crate::planner::table_meta;
 
-/// `SET modak.transparent_reads = off` restores plain heap semantics.
 static TRANSPARENT_READS: GucSetting<bool> = GucSetting::<bool>::new(true);
 
-/// `SET modak.mirrored_reads = 'hybrid'` opts a session into two-tier reads on
-/// MIRRORED tables without retention (default `'heap'`: the heap alone is
-/// complete and correct, so plain scans are untouched).
 static MIRRORED_READS: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(Some(c"heap"));
 
-/// Bounded wait (ms) for the mirror frontier to pass the session's WAL
-/// position before a hybrid read pins. On timeout the query falls back to the heap.
 static MIRROR_WAIT_MS: GucSetting<i32> = GucSetting::<i32>::new(5_000);
 
-/// Hybrid seam margin in tier-key units: the union splits at
-/// `max(tier_key) - modak.hybrid_lag` (recent slice from the heap, the bulk from
-/// the lake).
 static HYBRID_LAG: GucSetting<i32> = GucSetting::<i32>::new(0);
 
-/// `SET modak.explain = on` makes every routing decision raise a NOTICE.
 static EXPLAIN: GucSetting<bool> = GucSetting::<bool>::new(false);
 
 static mut PREV_PLANNER_HOOK: pg_sys::planner_hook_type = None;
 
 thread_local! {
-    // Re-entrancy guard: the hook's own SPI queries must never be rewritten.
-    // Reset on (sub)xact abort so a failed rewrite can't wedge the session.
     static IN_HOOK: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Pins acquired by transparent reads in the current transaction, released at
-/// PRE_COMMIT (abort rolls the pin rows back with the transaction).
 static SESSION_PINS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 
-/// Called from `_PG_init`. Safe to run at postmaster (shared_preload_libraries)
-/// or at first library load in a backend.
 pub(crate) unsafe fn init() {
     GucRegistry::define_bool_guc(
         c"modak.transparent_reads",
@@ -162,8 +145,6 @@ pub(crate) fn hybrid_lag() -> i32 {
     HYBRID_LAG.get()
 }
 
-/// Runs `f` with the re-entrancy guard set and an active snapshot available,
-/// the same envelope `rewrite_registered_rtes` uses for its own SPI.
 pub(crate) unsafe fn with_hook_guard<T>(f: impl FnOnce() -> T) -> T {
     IN_HOOK.with(|g| g.set(true));
     let pushed_snapshot = if !pg_sys::ActiveSnapshotSet() {
@@ -180,7 +161,6 @@ pub(crate) unsafe fn with_hook_guard<T>(f: impl FnOnce() -> T) -> T {
     out
 }
 
-/// Records a pin acquired during planning for release at PRE_COMMIT.
 pub(crate) fn remember_pin(pin: i64) {
     SESSION_PINS.lock().unwrap().push(pin);
 }
@@ -192,7 +172,6 @@ unsafe fn should_consider(parse: *mut pg_sys::Query) -> bool {
     if !pg_sys::IsTransactionState() {
         return false;
     }
-    // Reads only: DML and SELECT FOR UPDATE keep plain heap semantics.
     if (*parse).commandType != pg_sys::CmdType::CMD_SELECT
         || !(*parse).utilityStmt.is_null()
         || (*parse).hasModifyingCTE
@@ -200,13 +179,10 @@ unsafe fn should_consider(parse: *mut pg_sys::Query) -> bool {
     {
         return false;
     }
-    // The modak schema existing is the cheapest "extension installed here" probe.
     pg_sys::get_namespace_oid(c"modak".as_ptr(), true) != pg_sys::InvalidOid
 }
 
-// A walker (not a top-level rtable loop) reaches sub-selects, CTEs, and sublinks.
 struct WalkContext {
-    // Substituted subqueries reference the same relation, never rewrite them recursively.
     ours: Vec<*mut pg_sys::Query>,
 }
 
@@ -249,7 +225,6 @@ unsafe extern "C-unwind" fn walker(node: *mut pg_sys::Node, context: *mut c_void
                     kind => substitute(rte, ctx, kind),
                 }
             }
-            // range_table_walker descends into subquery RTEs itself.
             false
         }
         _ => pg_sys::expression_tree_walker_impl(node, Some(walker), context),
@@ -259,13 +234,9 @@ unsafe extern "C-unwind" fn walker(node: *mut pg_sys::Node, context: *mut c_void
 /// How a registered relation's scan is sourced.
 #[derive(PartialEq)]
 pub(crate) enum Rewrite {
-    /// Plain heap scan (unregistered, or a MIRRORED table whose heap is complete).
     Skip,
-    /// Union at the stored cut-line, for TIERED and for MIRRORED with
-    /// retention, where the heap below R is gone and the lake provably holds it.
     Seam,
-    /// MIRRORED without retention, session opted in: union at a computed seam
-    /// after a bounded wait for the mirror frontier.
+    SeamKeepHeap,
     Hybrid,
 }
 
@@ -279,8 +250,7 @@ pub(crate) unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
     {
         return Rewrite::Skip;
     }
-    // Dropped columns would skew the positional subquery-to-RTE output mapping.
-    let sql = "SELECT t.mode, t.heap_retention_lag IS NOT NULL, \
+    let sql = "SELECT t.mode, t.heap_retention_lag IS NOT NULL, t.keep_heap, \
                       EXISTS (SELECT 1 FROM pg_catalog.pg_attribute \
                               WHERE attrelid = $2 AND attisdropped) \
                FROM modak.tables t WHERE t.table_id = $1";
@@ -295,13 +265,14 @@ pub(crate) unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
         let row = rows.next()?;
         let mode = row.get::<String>(1).ok()??;
         let has_retention = row.get::<bool>(2).ok()??;
-        let skewed = row.get::<bool>(3).ok()??;
-        Some((mode, has_retention, skewed))
+        let keep_heap = row.get::<bool>(3).ok()??;
+        let skewed = row.get::<bool>(4).ok()??;
+        Some((mode, has_retention, keep_heap, skewed))
     });
     match row {
         None => Rewrite::Skip,
-        Some((_, _, true)) => Rewrite::Skip,
-        Some((mode, has_retention, _)) if mode == "mirrored" => {
+        Some((_, _, _, true)) => Rewrite::Skip,
+        Some((mode, has_retention, _, _)) if mode == "mirrored" => {
             if has_retention {
                 Rewrite::Seam
             } else if hybrid_requested() {
@@ -310,6 +281,7 @@ pub(crate) unsafe fn rewrite_kind(relid: pg_sys::Oid) -> Rewrite {
                 Rewrite::Skip
             }
         }
+        Some((_, _, true, _)) => Rewrite::SeamKeepHeap,
         Some(_) => Rewrite::Seam,
     }
 }
@@ -320,9 +292,6 @@ pub(crate) fn hybrid_requested() -> bool {
         .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"hybrid"))
 }
 
-/// The view-expansion recipe (rewriteHandler.c, `ApplyRetrieveRule`): swap the
-/// relation RTE for a subquery RTE but keep `relid`, `rellockmode`, and
-/// `perminfoindex`, so the original table is still locked and ACL-checked.
 unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kind: Rewrite) {
     let table = TableId(u32::from((*rte).relid));
 
@@ -330,7 +299,7 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
     let cut = match kind {
         Rewrite::Hybrid => match hybrid_cutline(table, &meta) {
             Some(cut) => cut,
-            None => return, // frontier wait timed out (NOTICE raised): heap read
+            None => return,
         },
         _ => or_error(PgCatalog.current(table)),
     };
@@ -359,15 +328,11 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
     (*rte).subquery = subquery;
     (*rte).security_barrier = false;
     (*rte).tablesample = ptr::null_mut();
-    (*rte).inh = false; // must not be set for a subquery RTE
+    (*rte).inh = false;
 
     ctx.ours.push(subquery);
 }
 
-/// The hybrid seam for a MIRRORED no-retention table. Waits (bounded) for the
-/// mirror frontier to pass the session's WAL position, after which everything
-/// this query's snapshot sees is provably in the lake, then splits the union
-/// at `max(tier_key) - modak.hybrid_lag`. None falls back to the heap.
 unsafe fn hybrid_cutline(table: TableId, meta: &modak_core::sqlgen::TableMeta) -> Option<Cutline> {
     if !wait_for_frontier(table) {
         notice!(
@@ -392,10 +357,7 @@ unsafe fn hybrid_cutline(table: TableId, meta: &modak_core::sqlgen::TableMeta) -
     })
 }
 
-/// True once `modak.cutline.replicated_lsn` passes the WAL position observed
-/// at call time. Bounded by `modak.mirror_wait_ms`.
 unsafe fn wait_for_frontier(table: TableId) -> bool {
-    // Insert position, since under synchronous_commit=off the write pointer may lag.
     let target =
         match Spi::get_one::<i64>("SELECT (pg_current_wal_insert_lsn() - '0/0'::pg_lsn)::bigint") {
             Ok(Some(t)) => t,

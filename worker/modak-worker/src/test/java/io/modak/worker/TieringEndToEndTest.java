@@ -17,7 +17,7 @@ import io.modak.common.TableId;
 import io.modak.common.TierKey;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -95,7 +95,7 @@ class TieringEndToEndTest {
         catalog = new JdbcCatalog(dataSource);
         table = catalog.register(new TableRegistration(
                 relOid("public.events"), "public", "events", List.of("id"), "event_time",
-                "{\"unit\":\"range-100\"}", IcebergLakeStoragePlugin.IDENTIFIER, location, null));
+                "{\"unit\":\"range-100\"}", IcebergLakeStoragePlugin.IDENTIFIER, location));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
         p0 = registerPartition("events_p0", 0, 100);
@@ -131,7 +131,7 @@ class TieringEndToEndTest {
 
         assertEquals(new Cutline(new TierKey(200), new LakeSnapshotId(sequenceNumber)),
                 catalog.readCutline(table));
-        String props = catalog.get(table).orElseThrow().lakeProps();
+        String props = catalog.readLakeProps(table).orElseThrow();
         assertTrue(props.contains(".metadata.json"), "metadata_location published: " + props);
         assertTrue(props.contains("snapshot_id"), "snapshot_id published: " + props);
 

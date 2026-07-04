@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.modak.catalog.InMemoryCatalog;
+import io.modak.catalog.MaintenancePolicy;
 import io.modak.catalog.RegisteredTable;
+import io.modak.catalog.TableMode;
 import io.modak.catalog.TableRegistration;
 import io.modak.common.PartitionState;
 import io.modak.common.TableId;
@@ -19,6 +21,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Optional;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -65,7 +68,7 @@ class PartitionPremakeTest {
         InMemoryCatalog catalog = new InMemoryCatalog();
         catalog.register(new TableRegistration(101L, "public", "metrics",
                 List.of("id"), "ts", "{\"unit\":\"range\",\"partition_width\":100}",
-                "iceberg", "/wh/metrics", null));
+                "iceberg", "/wh/metrics"));
         new PartitionSync(dataSource, catalog).sync(table);
         assertTrue(catalog.listPartitions(new TableId(101L)).stream()
                 .allMatch(p -> p.state() == PartitionState.HOT));
@@ -104,7 +107,8 @@ class PartitionPremakeTest {
     private static RegisteredTable registered(String table, long oid) {
         return new RegisteredTable(new TableId(oid), "public", table, List.of("id"), "ts",
                 "{\"unit\":\"range\",\"partition_width\":100}", "iceberg", "/wh/" + table,
-                null, 1);
+                "default", TableMode.TIERED, null, null, Optional.empty(), Optional.empty(),
+                false, MaintenancePolicy.NONE);
     }
 
     private static void exec(String sql) {

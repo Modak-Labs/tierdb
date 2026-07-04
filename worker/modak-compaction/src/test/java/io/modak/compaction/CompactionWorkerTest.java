@@ -18,14 +18,14 @@ import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
 import io.modak.lake.ColdTableSpec;
-import io.modak.lake.CommitterInitContext;
-import io.modak.lake.LakeCommitResult;
+import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.commit.LakeCommitResult;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTable;
-import io.modak.lake.LakeTieringFactory;
-import io.modak.lake.LakeTieringProps;
-import io.modak.lake.MergeWriter;
+import io.modak.lake.commit.LakeTieringFactory;
+import io.modak.lake.commit.LakeTieringProps;
+import io.modak.lake.commit.MergeWriter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -101,19 +101,19 @@ class CompactionWorkerTest {
             }
 
             @Override
-            public io.modak.lake.MaintenanceResult maintain(io.modak.lake.MaintenanceConfig config,
-                    LakeSnapshotId oldestPinnedSnapshot, Map<String, String> snapshotProps) {
-                return io.modak.lake.MaintenanceResult.NOOP;
+            public io.modak.lake.maintain.MaintenanceResult maintain(io.modak.lake.maintain.MaintenancePlan plan,
+                    Map<String, String> snapshotProps) {
+                return io.modak.lake.maintain.MaintenanceResult.NOOP;
             }
 
             @Override
-            public io.modak.lake.LakeCommitResult expireBelow(long boundary,
+            public io.modak.lake.commit.LakeCommitResult expireBelow(long boundary,
                     Map<String, String> snapshotProps) {
                 return null;
             }
 
             @Override
-            public io.modak.lake.LakeCommitResult ingest(List<String> files,
+            public io.modak.lake.commit.LakeCommitResult ingest(List<String> files,
                     io.modak.lake.TierKeyWindow window, Map<String, String> snapshotProps) {
                 throw new UnsupportedOperationException("not needed for compaction tests");
             }
@@ -136,7 +136,7 @@ class CompactionWorkerTest {
         catalog = new InMemoryCatalog();
         table = catalog.register(new TableRegistration(
                 42L, "public", "events", List.of("id"), "event_time",
-                "{\"unit\":\"hour\"}", "iceberg", "/wh/events", null));
+                "{\"unit\":\"hour\"}", "iceberg", "/wh/events"));
         catalog.initCutline(table, new TierKey(1000), new LakeSnapshotId(1));
         lake = new FakeMergeLake();
     }
@@ -157,7 +157,7 @@ class CompactionWorkerTest {
         Cutline after = catalog.readCutline(table);
         assertEquals(new TierKey(1000), after.t(), "compaction never moves T");
         assertEquals(new LakeSnapshotId(2), after.snapshot());
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("2.metadata.json"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("2.metadata.json"));
 
         assertEquals(List.of(new DeltaBatch.Key("3", 7), new DeltaBatch.Key("4", 8)),
                 catalog.clearedDeltaKeys());
@@ -179,7 +179,6 @@ class CompactionWorkerTest {
 
     @Test
     void aPinAcquiredAfterTheFoldBlocksPublishAndTheOpIsAbandonedNextCycle() {
-        // A reader pins mid-compaction: the in-transaction guard must reject the publish.
         CompactionPolicy racyPolicy = (t, now) -> {
             catalog.addReadPin(table, new Cutline(new TierKey(1000), new LakeSnapshotId(1)));
             return Optional.of(batchOf(table,
@@ -196,7 +195,6 @@ class CompactionWorkerTest {
 
         assertEquals(1, catalog.findIncompleteOps(table, OpKind.COMPACTION).size());
 
-        // Next cycle: still pinned, so it only tidies the journal. Re-folding later is safe.
         CompactionWorker idle = new CompactionWorker(catalog, lake, (t, now) -> Optional.empty());
         try {
             idle.runCycle(table, NOW);

@@ -1,8 +1,10 @@
 package io.modak.console;
 
-import io.modak.worker.Metrics;
-import io.modak.worker.SeriesStore;
+import io.modak.worker.http.Metrics;
+import io.modak.worker.http.SeriesStore;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -36,63 +38,58 @@ final class ConsoleServer {
         }
         server.createContext("/metrics", exchange -> send(exchange, 200,
                 "text/plain; version=0.0.4; charset=utf-8", metrics.render()));
-        server.createContext("/api/overview", exchange ->
-                json(exchange, () -> data.overview(leading.getAsBoolean())));
-        server.createContext("/api/table", exchange -> json(exchange, () -> {
-            Long id = queryId(exchange);
-            String body = id == null ? null : data.table(id);
-            if (body == null) {
-                throw new NotFound();
-            }
-            return body;
+        server.createContext("/api/openapi.yaml", exchange ->
+                sendResource(exchange, "/console/openapi.yaml", "application/yaml"));
+        server.createContext("/api/v1/overview", exchange -> json(exchange, () -> {
+            requireMethod(exchange, "GET");
+            return data.overview(leading.getAsBoolean());
         }));
-        server.createContext("/api/series", exchange ->
-                json(exchange, () -> seriesJson(series)));
-        server.createContext("/api/schema", exchange -> {
-            if (playground == null) {
-                send(exchange, 403, "application/json", "{\"error\":\"SQL disabled\"}");
-                return;
-            }
-            json(exchange, playground::schema);
-        });
-        server.createContext("/api/query", exchange -> {
-            if (playground == null) {
-                send(exchange, 403, "application/json",
-                        "{\"error\":\"SQL disabled (MODAK_CONSOLE_SQL=false)\"}");
-                return;
-            }
-            if (!"POST".equals(exchange.getRequestMethod())) {
-                send(exchange, 405, "application/json", "{\"error\":\"POST only\"}");
-                return;
-            }
-            json(exchange, () -> {
-                String sql = new String(exchange.getRequestBody().readAllBytes(),
-                        StandardCharsets.UTF_8).strip();
-                if (sql.isEmpty()) {
-                    return "{\"error\":\"empty statement\"}";
+        server.createContext("/api/v1/tables", exchange -> json(exchange, () -> {
+            String[] rest = subPath(exchange, "/api/v1/tables");
+            long id = pathId(rest);
+            if (rest.length == 1) {
+                requireMethod(exchange, "GET");
+                String body = data.table(id);
+                if (body == null) {
+                    throw new HttpError(404, "not found");
                 }
-                return playground.run(sql);
-            });
-        });
-        server.createContext("/api/explain", exchange -> {
-            if (playground == null) {
-                send(exchange, 403, "application/json",
-                        "{\"error\":\"SQL disabled (MODAK_CONSOLE_SQL=false)\"}");
-                return;
+                return body;
             }
-            if (!"POST".equals(exchange.getRequestMethod())) {
-                send(exchange, 405, "application/json", "{\"error\":\"POST only\"}");
-                return;
-            }
-            json(exchange, () -> {
-                String sql = new String(exchange.getRequestBody().readAllBytes(),
-                        StandardCharsets.UTF_8).strip();
-                if (sql.isEmpty()) {
-                    return "{\"error\":\"empty statement\"}";
+            if (rest.length == 2 && rest[1].equals("maintenance")) {
+                requireMethod(exchange, "POST");
+                if (!data.requestMaintenance(id)) {
+                    throw new HttpError(404, "not found");
                 }
-                return playground.explain(sql);
-            });
-        });
+                return "{\"requested\":true}";
+            }
+            throw new HttpError(404, "not found");
+        }));
+        server.createContext("/api/v1/storage-profiles", exchange -> json(exchange, () -> {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                return data.storageProfiles();
+            }
+            requireMethod(exchange, "POST");
+            return createProfile(exchange, data);
+        }));
+        server.createContext("/api/v1/series", exchange -> json(exchange, () -> {
+            requireMethod(exchange, "GET");
+            return seriesJson(series);
+        }));
+        server.createContext("/api/v1/schema", exchange -> json(exchange, () -> {
+            requirePlayground(playground);
+            requireMethod(exchange, "GET");
+            return playground.schema();
+        }));
+        server.createContext("/api/v1/query", exchange -> json(exchange, () -> {
+            requirePlayground(playground);
+            requireMethod(exchange, "POST");
+            return playground.run(requestSql(exchange));
+        }));
+        server.createContext("/api/v1/explain", exchange -> json(exchange, () -> {
+            requirePlayground(playground);
+            requireMethod(exchange, "POST");
+            return playground.explain(requestSql(exchange));
+        }));
         server.createContext("/", ConsoleServer::asset);
         server.start();
         return new ConsoleServer(server);
@@ -106,8 +103,6 @@ final class ConsoleServer {
         server.stop(0);
     }
 
-    private static final class NotFound extends Exception {}
-
     private interface Body {
         String get() throws Exception;
     }
@@ -115,12 +110,107 @@ final class ConsoleServer {
     private static void json(HttpExchange exchange, Body body) {
         try {
             send(exchange, 200, "application/json", body.get());
-        } catch (NotFound e) {
-            send(exchange, 404, "application/json", "{\"error\":\"not found\"}");
+        } catch (HttpError e) {
+            send(exchange, e.status(), "application/json", e.bodyJson());
         } catch (Exception e) {
             Log.error("console api %s failed: %s", exchange.getRequestURI().getPath(), e);
             send(exchange, 500, "application/json",
                     "{\"error\":" + Json.str(String.valueOf(e)) + "}");
+        }
+    }
+
+    private static void requireMethod(HttpExchange exchange, String method)
+            throws HttpError {
+        if (!method.equals(exchange.getRequestMethod())) {
+            throw new HttpError(405, method + " only");
+        }
+    }
+
+    private static void requirePlayground(ConsoleQuery playground) throws HttpError {
+        if (playground == null) {
+            throw new HttpError(403, "SQL disabled (MODAK_CONSOLE_SQL=false)");
+        }
+    }
+
+    private static String createProfile(HttpExchange exchange, ConsoleData data)
+            throws Exception {
+        JsonNode body;
+        try {
+            body = new ObjectMapper().readTree(exchange.getRequestBody());
+        } catch (Exception e) {
+            throw new HttpError(400, "body must be a JSON object");
+        }
+        String name = textOrNull(body, "name");
+        String warehouse = textOrNull(body, "warehouse");
+        if (name == null || warehouse == null) {
+            throw new HttpError(400, "name and warehouse are required");
+        }
+        JsonNode config = body.get("lakeConfig");
+        if (config != null && !config.isNull() && !config.isObject()) {
+            throw new HttpError(400, "lakeConfig must be a JSON object of provider key=values");
+        }
+        try {
+            data.createStorageProfile(name,
+                    textOrNull(body, "lakeFormat"), warehouse,
+                    config == null || config.isNull() ? null : config.toString(),
+                    textOrNull(body, "credentialRef"),
+                    body.path("isDefault").asBoolean(false));
+        } catch (java.sql.SQLException e) {
+            if ("23505".equals(e.getSQLState())) {
+                throw new HttpError(409, "profile '" + name + "' already exists "
+                        + "(or another default is set)");
+            }
+            throw e;
+        }
+        return "{\"created\":true}";
+    }
+
+    private static String textOrNull(JsonNode body, String field) {
+        JsonNode node = body.get(field);
+        return node == null || node.isNull() || node.asText().isBlank()
+                ? null : node.asText();
+    }
+
+    private static String requestSql(HttpExchange exchange) throws Exception {
+        String sql = new String(exchange.getRequestBody().readAllBytes(),
+                StandardCharsets.UTF_8).strip();
+        if (sql.isEmpty()) {
+            throw new HttpError(400, "empty statement");
+        }
+        return sql;
+    }
+
+    private static String[] subPath(HttpExchange exchange, String prefix) throws HttpError {
+        String path = exchange.getRequestURI().getPath();
+        String rest = path.length() > prefix.length() ? path.substring(prefix.length()) : "";
+        if (rest.startsWith("/")) {
+            rest = rest.substring(1);
+        }
+        if (rest.isEmpty()) {
+            throw new HttpError(404, "not found");
+        }
+        return rest.split("/");
+    }
+
+    private static long pathId(String[] segments) throws HttpError {
+        try {
+            return Long.parseLong(segments[0]);
+        } catch (NumberFormatException e) {
+            throw new HttpError(404, "not found");
+        }
+    }
+
+    private static void sendResource(HttpExchange exchange, String resource,
+            String contentType) {
+        try (InputStream in = ConsoleServer.class.getResourceAsStream(resource)) {
+            if (in == null) {
+                send(exchange, 404, "application/json", "{\"error\":\"not found\"}");
+                return;
+            }
+            send(exchange, 200, contentType,
+                    new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            Log.error("console resource %s failed: %s", resource, e);
         }
     }
 
@@ -134,23 +224,6 @@ final class ConsoleServer {
             out.add(Json.str(e.getKey()) + ":" + points);
         }
         return "{\"series\":" + out + "}";
-    }
-
-    private static Long queryId(HttpExchange exchange) {
-        String query = exchange.getRequestURI().getQuery();
-        if (query == null) {
-            return null;
-        }
-        for (String pair : query.split("&")) {
-            if (pair.startsWith("id=")) {
-                try {
-                    return Long.parseLong(pair.substring(3));
-                } catch (NumberFormatException e) {
-                    return null;
-                }
-            }
-        }
-        return null;
     }
 
     private static final Map<String, String> VENDOR = vendorAssets();

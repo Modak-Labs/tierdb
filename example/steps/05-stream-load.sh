@@ -7,7 +7,7 @@ source "$(dirname "$0")/../lib.sh"
 LOAD_URL="http://localhost:9090/api/load/public.events"
 TOKEN="modak-example"
 
-load() { # label jsonl
+load() {
     curl -sS -X POST "$LOAD_URL" \
         -H "X-Modak-Token: $TOKEN" \
         -H "X-Modak-Label: $1" \

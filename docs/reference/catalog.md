@@ -9,9 +9,48 @@ created and migrated automatically by the worker at startup
 All columns stay executor-portable (plain ints, text, jsonb) because
 `pg_duckdb` may push read-path queries down to DuckDB.
 
+## Data model
+
+Each table models one concern. `modak.tables` holds registration config and
+nothing else: everything that changes at runtime lives in its own row keyed by
+`table_id`, and all of it cascades on unregister.
+
+```mermaid
+erDiagram
+    storage_profiles ||--o{ tables : "warehouse binding"
+    tables ||--|| cutline : "seam + lake pointer"
+    tables ||--o{ partitions : "lifecycle map"
+    tables ||--o{ delta : "correction overlay"
+    tables ||--o{ read_pins : "active readers"
+    tables ||--o{ op_log : "journal"
+    tables ||--o{ load_labels : "load ledger"
+    tables ||--o| copy_progress : "transient copy state"
+    tables ||--o| lake_stats : "monitoring snapshot"
+    tables ||--o| maintenance_requests : "pending trigger"
+```
+
+## `modak.storage_profiles`
+
+Named warehouse bindings tables register against (see
+[Storage profiles](../tables/storage-profiles.md)). The seeded `default`
+profile has a blank warehouse and `NULL` format, both meaning "resolve from
+the worker's environment". A partial unique index keeps exactly one default.
+
+| Column | Meaning |
+|--------|---------|
+| `profile_name` | Primary key, referenced by `modak.tables.storage_profile` |
+| `lake_format` | Lake plugin id. `NULL` = worker env |
+| `warehouse` | Warehouse root. `''` = worker env |
+| `lake_config` | Non-secret `key=value` config overrides, any provider |
+| `credential_ref` | Names a credential set in the worker's environment (`MODAK_CREDENTIALS_<REF>`). `NULL` = worker default |
+| `is_default` | The profile new registrations get without `--profile` |
+
 ## `modak.tables`
 
-Registered logical tables. One row per registration.
+Registered logical tables. One row per registration, written at register time
+and only touched again for policy edits. CHECK constraints keep mode-specific
+columns coherent (mirror plumbing only on mirrored rows, retention and
+keep-heap only on tiered rows).
 
 | Column | Meaning |
 |--------|---------|
@@ -22,15 +61,19 @@ Registered logical tables. One row per registration.
 | `partition_scheme` | Lake partition layout, e.g. `{"width": 3600}` |
 | `lake_format` | Lake plugin id (`iceberg`) |
 | `lake_table_ref` | The format's name for the cold table (path or catalog identifier) |
-| `lake_props` | Opaque per-format state, e.g. Iceberg's `metadata_location` |
+| `storage_profile` | The [storage profile](../tables/storage-profiles.md) the lake lives on |
 | `mode` | `tiered` or `mirrored` |
 | `publication_name`, `slot_name` | Mirrored: CDC plumbing |
 | `heap_retention_lag` | Mirrored: heap retention window. `NULL` = keep all |
 | `lake_retention_lag` | Tiered: expire lake rows this far behind the cut-line. `NULL` = keep forever |
+| `keep_heap` | Tiered: never drop heap partitions, a trigger mirrors their DML into the delta |
+| `maintenance_policy` | Per-table maintenance overrides (format-interpreted keys). `NULL` = all defaults |
 
 ## `modak.cutline`
 
-The seam, per table, always advanced together in one transaction.
+The seam, per table, always advanced together in one transaction. The
+published lake pointer lives here because it must move in the same row-update
+as `S`: a reader that sees the cut-line sees the matching physical pointer.
 
 | Column | Meaning |
 |--------|---------|
@@ -38,6 +81,7 @@ The seam, per table, always advanced together in one transaction.
 | `lake_snapshot_id` | `S`: pinned cold-store version consistent with `T` |
 | `replicated_lsn` | `F`: the mirror frontier (WAL position). `NULL` for tiered tables |
 | `retention_line` | `R`: lake rows with `tier_key < R` are expired. `NULL` = nothing expired yet |
+| `lake_props` | The published pointer to `S`, e.g. Iceberg's `metadata_location` and `snapshot_id` |
 
 Connectors reading the seam should treat `retention_line` as the floor of the
 table: rows below it exist in old lake snapshots but not in the current one,
@@ -66,10 +110,30 @@ The correction overlay for cold rows, merged on read, folded by compaction.
 Active read pins. The oldest pin is the reclaim and compaction horizon. Pins
 are transaction-scoped rows with an `expires_at` bound.
 
-## `modak.tiering_log`
+## `modak.op_log`
 
-Idempotency + crash-resume journal for tiering, compaction, and maintenance
-operations (`op_id`, `op_kind`, `phase`, snapshot, details).
+Idempotency + crash-resume journal for every lake-writing operation
+(`op_id`, `op_kind`, `phase`, snapshot, details). Op kinds: `tiering`,
+`compaction`, `maintenance`, `retention`, `ingest`, `load`.
+
+## `modak.load_labels`
+
+The Stream Load label ledger: a label commits with its batch, replays return
+the recorded result, `staged` labels await lake adoption.
+
+## `modak.maintenance_requests`
+
+Pending out-of-schedule maintenance triggers, at most one per table.
+`modak-worker maintain` and the console upsert a row (`requested_by` records
+who asked), the leader claims it with a `DELETE ... RETURNING` so exactly one
+run fires. The result lands in `modak.op_log` like any scheduled pass.
+
+## `modak.lake_stats`
+
+Lake health, one row per table, refreshed by the worker. `stats` and
+`warnings` are owned by the format plugin (counter names and health judgments
+differ per format), `policy` is a snapshot of the maintenance settings the
+table ran with at collection time.
 
 ## `modak.copy_progress`
 

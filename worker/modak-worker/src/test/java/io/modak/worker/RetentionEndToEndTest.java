@@ -1,5 +1,6 @@
 package io.modak.worker;
 
+import io.modak.worker.ops.RetentionWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,7 +16,7 @@ import io.modak.common.TableId;
 import io.modak.common.TierKey;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -97,7 +98,7 @@ class RetentionEndToEndTest {
         table = catalog.register(new TableRegistration(
                 relOid("public.events"), "public", "events", List.of("id"), "event_time",
                 "{\"unit\":\"range\",\"partition_width\":100}",
-                IcebergLakeStoragePlugin.IDENTIFIER, location, null,
+                IcebergLakeStoragePlugin.IDENTIFIER, location,
                 TableMode.TIERED, null, null, Optional.empty(), Optional.of(50L)));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
@@ -149,7 +150,7 @@ class RetentionEndToEndTest {
         assertEquals("3", queryOne("SELECT pk FROM modak.delta"));
         assertTrue(catalog.listPartitions(table).stream()
                 .noneMatch(p -> p.id().equals(p0)), "p0's catalog row below R is gone");
-        assertTrue(catalog.get(table).orElseThrow().lakeProps().contains("snapshot_id"));
+        assertTrue(catalog.readLakeProps(table).orElseThrow().contains("snapshot_id"));
 
         long snapshotAfter = catalog.readCutline(table).snapshot().id();
         retention.runCycle(catalog.get(table).orElseThrow());

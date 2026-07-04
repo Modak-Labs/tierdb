@@ -20,9 +20,7 @@ import java.util.Map;
 
 /**
  * Accumulates decoded changes for one mirrored table and drains them as a
- * {@link DeltaRowsBatch}, newest-wins per PK within the batch. Requires REPLICA
- * IDENTITY FULL (the registrar sets it): deletes need the old image's tier-key,
- * and unchanged-TOAST cells in updates are filled from it.
+ * {@link DeltaRowsBatch}, newest-wins per PK within the batch.
  */
 public final class ChangeBatch {
 
@@ -43,12 +41,6 @@ public final class ChangeBatch {
         this.tierKeyColumn = tierKeyColumn;
     }
 
-    /**
-     * Classifies the incoming Relation against the adopted layout. Returns
-     * columns to add to the lake (all on a stream's first Relation, appended
-     * ones on ADD COLUMN, none when unchanged). Destructive changes throw
-     * {@link SchemaDivergedException}.
-     */
     public List<RowBatchData.Column> classify(Relation relation) {
         if (columns == null) {
             List<RowBatchData.Column> all = new ArrayList<>(relation.columns().size());
@@ -91,7 +83,6 @@ public final class ChangeBatch {
         return added;
     }
 
-    /** Column layout for subsequent changes. pgoutput re-announces it per stream and on DDL. */
     public void onRelation(Relation relation) {
         List<RowBatchData.Column> mapped = new ArrayList<>(relation.columns().size());
         int[] pk = new int[pkColumns.size()];
@@ -136,7 +127,6 @@ public final class ChangeBatch {
         Object[] old = materialize(delete.oldRow(), null);
         String pk = pkOf(old);
         long tierKey = tierKeyOf(old);
-        // The old image stays on the tombstone: the equality delete needs typed pk values.
         byPk.put(pk, new DeltaRowsBatch.Entry(
                 pk, true, tierKey, lakeTierKey(pk, tierKey, tierKey), nextVersion(), old));
     }
@@ -152,11 +142,6 @@ public final class ChangeBatch {
                 pk, false, tierKey, lakeTierKey(pk, tierKey, eventOldTier), nextVersion(), row));
     }
 
-    /**
-     * Where the lake still holds this pk's image, or null when that is the
-     * entry's own tier. An UPDATE that changes the tier key must delete the old
-     * partition's image, and earlier changes in the batch already track it.
-     */
     private Long lakeTierKey(String pk, long tierKey, long eventOldTier) {
         DeltaRowsBatch.Entry prior = byPk.get(pk);
         long lake = prior != null ? prior.lakeTierKey() : eventOldTier;
@@ -183,7 +168,6 @@ public final class ChangeBatch {
         return byPk.size();
     }
 
-    /** The collapsed batch, clearing the accumulator for the next window. */
     public DeltaRowsBatch drain() {
         requireRelation();
         DeltaRowsBatch batch = new DeltaRowsBatch(
@@ -232,7 +216,6 @@ public final class ChangeBatch {
         }
     }
 
-    // Postgres type OIDs (pg_type.dat) -> the portable column vocabulary.
     private static RowBatchData.Column columnOf(Column c) {
         return switch (c.typeOid()) {
             case 16 -> new RowBatchData.Column(c.name(), RowBatchData.ColumnType.BOOLEAN);
@@ -247,7 +230,6 @@ public final class ChangeBatch {
         };
     }
 
-    // numeric typmod packs (precision << 16 | scale) + 4; -1 = unconstrained -> double.
     private static RowBatchData.Column numericColumn(Column c) {
         if (c.typeMod() < 4) {
             return new RowBatchData.Column(c.name(), RowBatchData.ColumnType.DOUBLE);

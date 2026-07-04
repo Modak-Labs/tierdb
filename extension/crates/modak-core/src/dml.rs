@@ -29,19 +29,14 @@ pub enum TierPredicate {
 /// Which side of the cut-line the matched rows can be on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Classification {
-    /// Every matched row has `tier_key >= T`: leave the statement untouched.
     Hot,
-    /// Every matched row has `tier_key < T`: only the delta half can match.
     Cold,
-    /// Rows may fall on both sides, or nothing is provable.
     Mixed,
 }
 
 pub fn classify(p: &TierPredicate, t: TierKey) -> Classification {
     match p {
         TierPredicate::Cmp(op, c) => classify_cmp(*op, *c, t.0),
-        // One provable part bounds the whole conjunction. Hot and cold parts
-        // together match nothing, and Hot means leave untouched.
         TierPredicate::And(parts) => {
             if parts.iter().any(|p| classify(p, t) == Classification::Hot) {
                 Classification::Hot
@@ -51,8 +46,6 @@ pub fn classify(p: &TierPredicate, t: TierKey) -> Classification {
                 Classification::Mixed
             }
         }
-        // A disjunction is only provable when every arm lands on the same
-        // side. An empty IN list matches nothing, so Hot keeps it untouched.
         TierPredicate::Or(parts) => {
             if parts.iter().all(|p| classify(p, t) == Classification::Hot) {
                 Classification::Hot
@@ -112,12 +105,8 @@ fn classify_cmp(op: CmpOp, c: i64, t: i64) -> Classification {
 /// names so the same text binds in both halves.
 #[derive(Debug, Clone, Default)]
 pub struct DmlFragments {
-    /// The WHERE clause, if the statement had one.
     pub where_sql: Option<String>,
-    /// UPDATE only, `(column, expression)` per SET item in statement order.
     pub set_items: Vec<(String, String)>,
-    /// RETURNING items as `(output name, expression)` in output order. UPDATE
-    /// evaluates the expressions over the new row image, DELETE over the old.
     pub returning: Vec<(String, String)>,
 }
 

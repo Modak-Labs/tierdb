@@ -20,7 +20,6 @@ final class LeaderLease {
         this.dataSource = dataSource;
     }
 
-    /** One non-blocking attempt, a failed try leaves nothing open. */
     boolean tryAcquire() throws Exception {
         Connection c = dataSource.getConnection();
         try (Statement s = c.createStatement();

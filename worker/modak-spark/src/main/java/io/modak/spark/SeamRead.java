@@ -12,8 +12,7 @@ import org.apache.spark.sql.functions;
 /**
  * One pinned two-tier read: the heap over JDBC, the lake at the pinned
  * snapshot, and the delta overlay merged newest-wins, unioned into one
- * dataframe. Spark is lazy, so close only after the last action. The pin's
- * {@code expires_at} covers a consumer that dies without closing.
+ * dataframe.
  */
 public final class SeamRead implements AutoCloseable {
 
@@ -57,7 +56,6 @@ public final class SeamRead implements AutoCloseable {
 
         Dataset<Row> cold = coldBranch();
         if (state.hybridSeam() != null) {
-            // A mirrored lake holds every row, not just rows below the seam.
             cold = cold.filter(cold.col(state.tierKeyCol()).lt(state.readSeam()));
         }
 

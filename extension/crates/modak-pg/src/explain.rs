@@ -16,8 +16,6 @@ use crate::delta::{write_meta, WriteMeta};
 use crate::dml_rewrite::{const_i64, extract_predicate};
 use crate::hook;
 
-/// One line per row, like EXPLAIN. The report reflects the cut-line at call
-/// time; tiering moves it, so the same statement can route differently later.
 #[pg_extern]
 fn modak_explain(sql: &str) -> SetOfIterator<'static, String> {
     let lines = unsafe { hook::with_hook_guard(|| explain(sql)) };
@@ -55,9 +53,8 @@ unsafe fn explain(sql: &str) -> Vec<String> {
 /// How modak treats a relation, straight from the catalog.
 enum Disposition {
     Unregistered,
-    /// Mirrored without retention: the heap is complete.
     HeapComplete,
-    /// Tiered, or mirrored with heap retention: reads and writes split at the seam.
+    KeepHeap,
     Seam {
         mode: String,
     },
@@ -67,7 +64,7 @@ fn disposition(relid: pg_sys::Oid) -> Disposition {
     let row = Spi::connect(|client| {
         let mut rows = client
             .select(
-                "SELECT mode, heap_retention_lag IS NOT NULL \
+                "SELECT mode, heap_retention_lag IS NOT NULL, keep_heap \
                  FROM modak.tables WHERE table_id = $1",
                 Some(1),
                 &[(u32::from(relid) as i64).into()],
@@ -76,15 +73,17 @@ fn disposition(relid: pg_sys::Oid) -> Disposition {
         let row = rows.next()?;
         let mode = row.get::<String>(1).ok()??;
         let has_retention = row.get::<bool>(2).ok()??;
-        Some((mode, has_retention))
+        let keep_heap = row.get::<bool>(3).ok()??;
+        Some((mode, has_retention, keep_heap))
     });
     match row {
         None => Disposition::Unregistered,
-        Some((mode, false)) if mode == "mirrored" => Disposition::HeapComplete,
-        Some((mode, true)) if mode == "mirrored" => Disposition::Seam {
+        Some((mode, false, _)) if mode == "mirrored" => Disposition::HeapComplete,
+        Some((mode, true, _)) if mode == "mirrored" => Disposition::Seam {
             mode: "mirrored + heap retention".into(),
         },
-        Some((mode, _)) => Disposition::Seam { mode },
+        Some((_, _, true)) => Disposition::KeepHeap,
+        Some((mode, _, _)) => Disposition::Seam { mode },
     }
 }
 
@@ -123,9 +122,6 @@ fn delta_backlog(relid: pg_sys::Oid) -> i64 {
     .unwrap_or(0)
 }
 
-// SELECT: every registered relation in the tree gets a section describing
-// which tiers serve it.
-
 struct Collect {
     relids: Vec<pg_sys::Oid>,
 }
@@ -140,8 +136,15 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
     let mut lines = Vec::new();
     let mut sections = 0;
     for relid in ctx.relids {
-        match disposition(relid) {
+        let disp = match disposition(relid) {
+            Disposition::KeepHeap => Disposition::Seam {
+                mode: "tiered + keep-heap".into(),
+            },
+            d => d,
+        };
+        match disp {
             Disposition::Unregistered => {}
+            Disposition::KeepHeap => unreachable!(),
             Disposition::HeapComplete => {
                 sections += 1;
                 let meta = meta_of(relid);
@@ -228,9 +231,6 @@ unsafe extern "C-unwind" fn collect_walker(node: *mut pg_sys::Node, context: *mu
     }
 }
 
-// UPDATE and DELETE: the classifier's verdict plus what the rewrite would do,
-// including the shapes it would reject, reported instead of raised.
-
 unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
     let rte = pg_sys::list_nth((*query).rtable, (*query).resultRelation - 1)
         as *mut pg_sys::RangeTblEntry;
@@ -246,6 +246,22 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
                  (CDC trails it into the lake)",
                 qualified(&meta)
             )]
+        }
+        Disposition::KeepHeap => {
+            let meta = meta_of(relid);
+            let cut = cutline_of(relid);
+            vec![
+                format!(
+                    "{verb} on {} (tiered + keep-heap): plain heap DML, the heap \
+                     holds every row",
+                    qualified(&meta)
+                ),
+                format!(
+                    "  rows with {} < {}: the partition trigger mirrors the change \
+                     into modak.delta for seam reads and the lake fold",
+                    meta.tier_key_col, cut.t.0
+                ),
+            ]
         }
         Disposition::Seam { mode } => {
             let meta = meta_of(relid);
@@ -312,7 +328,6 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
     }
 }
 
-/// The statement shapes the rewrite raises on, reported as lines instead.
 unsafe fn dml_rejections(query: *mut pg_sys::Query, meta: &WriteMeta, verb: &str) -> Vec<String> {
     let mut out = Vec::new();
     if !(*query).cteList.is_null() {
@@ -351,9 +366,6 @@ unsafe fn sets_column(query: *mut pg_sys::Query, col: &str) -> bool {
     false
 }
 
-// INSERT: routing is per row via the spill trigger, so the report gives the
-// rule, and exact counts when the tier keys are literal.
-
 unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
     let rte = pg_sys::list_nth((*query).rtable, (*query).resultRelation - 1)
         as *mut pg_sys::RangeTblEntry;
@@ -369,6 +381,21 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                  (CDC trails it into the lake)",
                 qualified(&meta)
             )]
+        }
+        Disposition::KeepHeap => {
+            let meta = meta_of(relid);
+            let cut = cutline_of(relid);
+            vec![
+                format!(
+                    "INSERT into {} (tiered + keep-heap): the heap takes every row",
+                    qualified(&meta)
+                ),
+                format!(
+                    "  rows with {} < {}: the partition trigger mirrors them into \
+                     modak.delta for seam reads and the lake fold",
+                    meta.tier_key_col, cut.t.0
+                ),
+            ]
         }
         Disposition::Seam { mode } => {
             let meta = meta_of(relid);
@@ -441,8 +468,6 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
     }
 }
 
-/// The tier keys of an INSERT's rows when every one is a literal: a Const in
-/// the target list (single row) or a column of an all-Const VALUES list.
 unsafe fn literal_tier_keys(
     query: *mut pg_sys::Query,
     relid: pg_sys::Oid,
@@ -464,8 +489,6 @@ unsafe fn literal_tier_keys(
     if let Some(v) = const_i64(expr) {
         return Some(vec![v]);
     }
-    // Multi-row VALUES: the target entry is a Var into the VALUES RTE, and
-    // the tier keys sit at that Var's position in each values list.
     if (*expr).type_ != pg_sys::NodeTag::T_Var {
         return None;
     }
@@ -498,8 +521,6 @@ fn spill_enabled(relid: pg_sys::Oid, meta: &WriteMeta) -> bool {
     .unwrap_or(false)
 }
 
-// COPY FROM routes exactly like INSERT, per row through the spill.
-
 unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
     if !(*stmt).is_from || (*stmt).relation.is_null() {
         return vec!["COPY TO: a read, see the SELECT report".into()];
@@ -522,6 +543,21 @@ unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
                  (CDC trails it into the lake)",
                 qualified(&meta)
             )]
+        }
+        Disposition::KeepHeap => {
+            let meta = meta_of(relid);
+            let cut = cutline_of(relid);
+            vec![
+                format!(
+                    "COPY {} FROM (tiered + keep-heap): the heap takes every row",
+                    qualified(&meta)
+                ),
+                format!(
+                    "  rows with {} < {}: the partition trigger mirrors them into \
+                     modak.delta",
+                    meta.tier_key_col, cut.t.0
+                ),
+            ]
         }
         Disposition::Seam { mode } => {
             let meta = meta_of(relid);

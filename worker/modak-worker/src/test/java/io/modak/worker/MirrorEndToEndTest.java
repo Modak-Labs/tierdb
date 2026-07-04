@@ -1,5 +1,7 @@
 package io.modak.worker;
 
+import io.modak.worker.cli.TableRegistrar;
+import io.modak.worker.ops.MirrorWorker;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -33,12 +35,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/**
- * End-to-end for MIRRORED tables. Covers registration (publication, slot with
- * exported snapshot, initial copy), the streaming mirror pump folding plain
- * DML into Iceberg via logical replication, and crash/resume, where a stopped
- * pump picks the stream back up from the catalog frontier with no gaps and no duplicates.
- */
+/** End-to-end for MIRRORED tables. */
 class MirrorEndToEndTest {
 
     @TempDir
@@ -117,7 +114,6 @@ class MirrorEndToEndTest {
             stop(worker, pump);
         }
 
-        // "Crash": the pump is gone, writes keep accumulating in the slot.
         exec("INSERT INTO public.vehicles VALUES (5, 'VIN-005', 'idle', 300)");
         exec("UPDATE public.vehicles SET status = 'idle', last_seen = 310 WHERE id = 4");
 
@@ -153,7 +149,6 @@ class MirrorEndToEndTest {
         assertTrue(!pump.isAlive(), "pump thread stopped");
     }
 
-    // With synchronous_commit=off, pg_current_wal_lsn() may lag this session's commits.
     private static long currentWalLsn() {
         return Long.parseLong(
                 queryOne("SELECT (pg_current_wal_insert_lsn() - '0/0'::pg_lsn)::bigint::text"));

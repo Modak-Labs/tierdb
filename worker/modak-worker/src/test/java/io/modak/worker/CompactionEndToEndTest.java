@@ -19,7 +19,7 @@ import io.modak.compaction.JdbcCompactionPolicy;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.iceberg.IcebergLakeStoragePlugin;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.SealGatedEvictionPolicy;
+import io.modak.tiering.policy.SealGatedEvictionPolicy;
 import io.modak.tiering.TieringWorker;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import java.io.IOException;
@@ -49,9 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * End-to-end for the correction path. Rows age into Iceberg (tiering),
  * corrections land in {@code modak.delta} (as the Rust router would write
- * them), and one compaction cycle folds them into the base. Upsert replaces,
- * tombstone removes, {@code S} advances, the folded delta rows are cleared,
- * {@code T} never moves.
+ * them), and one compaction cycle folds them into the base.
  */
 class CompactionEndToEndTest {
 
@@ -92,7 +90,7 @@ class CompactionEndToEndTest {
         catalog = new JdbcCatalog(dataSource);
         table = catalog.register(new TableRegistration(
                 relOid("public.events"), "public", "events", List.of("id"), "event_time",
-                "{\"unit\":\"range\"}", IcebergLakeStoragePlugin.IDENTIFIER, location, null));
+                "{\"unit\":\"range\"}", IcebergLakeStoragePlugin.IDENTIFIER, location));
         catalog.initCutline(table, new TierKey(0), new LakeSnapshotId(0));
 
         PartitionId p0 = new PartitionId(table, "events_p0");
@@ -119,7 +117,6 @@ class CompactionEndToEndTest {
         Cutline before = catalog.readCutline(table);
         assertEquals(new TierKey(200), before.t());
 
-        // What the Rust router writes for a cold upsert and a cold delete.
         exec("INSERT INTO modak.delta (table_id, pk, op, tier_key, version, payload) VALUES "
                 + "(" + table.oid() + ", '2', 0, 20, nextval('modak.delta_version'), "
                 + "'{\"id\":2,\"event_time\":20,\"val\":\"corrected\"}'), "
@@ -146,12 +143,12 @@ class CompactionEndToEndTest {
         assertTrue(after.snapshot().compareTo(before.snapshot()) > 0, "S advanced");
 
         assertEquals("0", queryOne("SELECT count(*)::text FROM modak.delta"), "folded rows cleared");
-        String props = catalog.get(table).orElseThrow().lakeProps();
+        String props = catalog.readLakeProps(table).orElseThrow();
         assertTrue(props.contains(".metadata.json"), "metadata_location republished: " + props);
 
         assertTrue(catalog.findIncompleteOps(table, OpKind.COMPACTION).isEmpty());
         assertEquals("advanced", queryOne(
-                "SELECT phase FROM modak.tiering_log WHERE op_kind = 'compaction' ORDER BY updated_at DESC LIMIT 1"));
+                "SELECT phase FROM modak.op_log WHERE op_kind = 'compaction' ORDER BY updated_at DESC LIMIT 1"));
     }
 
     private static LakeStorage lake() {

@@ -1,7 +1,5 @@
-//! Renders a [`QueryPlan`] into the two-tier SQL shape: hot scan
-//! (`tier_key >= T`) UNION ALL pinned cold Iceberg scan merged with
-//! `modak.delta`. `T` and `S` are bound as constants, so the executor performs
-//! no consistency reasoning.
+//! Renders a [`QueryPlan`] into the two-tier SQL shape: hot scan (`tier_key
+//! >= T`) UNION ALL pinned cold Iceberg scan merged with `modak.delta`.
 
 use crate::domain::TableId;
 use crate::planner::QueryPlan;

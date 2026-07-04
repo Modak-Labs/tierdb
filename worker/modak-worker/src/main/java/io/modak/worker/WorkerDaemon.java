@@ -4,28 +4,41 @@ import io.modak.catalog.CatalogSchema;
 import io.modak.catalog.JdbcCatalog;
 import io.modak.catalog.RegisteredTable;
 import io.modak.catalog.TableMode;
+import io.modak.common.Cutline;
+import io.modak.common.TableId;
 import io.modak.compaction.CompactionWorker;
 import io.modak.compaction.JdbcCompactionPolicy;
 import io.modak.lake.LakeStorage;
-import io.modak.common.Cutline;
-import io.modak.common.TableId;
-import io.modak.tiering.CeilingLagEvictionPolicy;
+import io.modak.lake.maintain.MaintenanceEngine;
 import io.modak.tiering.JdbcHotSource;
-import io.modak.tiering.LagBasedTieringPolicy;
 import io.modak.tiering.PartitionPremake;
 import io.modak.tiering.PartitionSync;
 import io.modak.tiering.ReclaimException;
 import io.modak.tiering.TieringWorker;
+import io.modak.tiering.policy.CeilingLagEvictionPolicy;
+import io.modak.tiering.policy.LagBasedTieringPolicy;
+import io.modak.worker.http.LoadEndpoint;
+import io.modak.worker.http.Metrics;
+import io.modak.worker.http.MetricsServer;
+import io.modak.worker.http.SeriesStore;
+import io.modak.worker.ops.EmbeddedMaintenanceEngine;
+import io.modak.worker.ops.LakeStatsCollector;
+import io.modak.worker.ops.LoadAdoptionWorker;
+import io.modak.worker.ops.MaintenanceWorker;
+import io.modak.worker.ops.MirrorRetention;
+import io.modak.worker.ops.MirrorWorker;
+import io.modak.worker.ops.RetentionWorker;
+import io.modak.worker.ops.StagedFileJanitor;
+import io.modak.worker.ops.StatusSweep;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import javax.sql.DataSource;
 
 /**
- * Fixed-interval scheduler over every registered table's tiering, compaction,
- * mirror, and maintenance cycles. Active/passive HA via an advisory-lock leader
- * lease. Correctness never rests on the lease, since advances are
- * monotonic-guarded and slots single-consumer, it only prevents duplicate work.
+ * Fixed-interval scheduler over every registered table's tiering,
+ * compaction, mirror, and maintenance cycles. Active/passive HA via an
+ * advisory-lock leader lease.
  */
 public final class WorkerDaemon {
 
@@ -34,11 +47,15 @@ public final class WorkerDaemon {
     private final JdbcCatalog catalog;
     private final LeaderLease lease;
     private final PartitionSync partitionSync;
-    private final Map<String, LakeStorage> lakes = new HashMap<>();
+    private final LakeStorages lakes;
     private final Map<TableId, Cutline> lastLogged = new HashMap<>();
     private final Map<TableId, MirrorPump> mirrorPumps = new HashMap<>();
     private final Map<TableId, MirrorRetention> retentions = new HashMap<>();
     private final Map<TableId, Long> lastMaintenance = new HashMap<>();
+    private final Map<TableId, Long> lastLakeStats = new HashMap<>();
+    private final MaintenanceEngine maintenanceEngine = new EmbeddedMaintenanceEngine();
+    private final LakeStatsCollector lakeStatsCollector;
+    private final StagedFileJanitor stagedFileJanitor;
     private final java.util.Set<TableId> copyAnnounced = new java.util.HashSet<>();
     private final java.util.Set<TableId> premakeSkipAnnounced = new java.util.HashSet<>();
     private final Metrics metrics = new Metrics();
@@ -57,9 +74,12 @@ public final class WorkerDaemon {
         this.dataSource = config.dataSource();
         this.lease = new LeaderLease(dataSource);
         this.catalog = new JdbcCatalog(dataSource);
+        this.lakes = new LakeStorages(config, catalog);
         this.partitionSync = new PartitionSync(dataSource, catalog);
         this.statusSweep = new StatusSweep(dataSource, metrics, seriesStore,
                 config.slotWarnBytes(), config.deltaBacklogWarnRows());
+        this.lakeStatsCollector = new LakeStatsCollector(dataSource);
+        this.stagedFileJanitor = new StagedFileJanitor(dataSource);
     }
 
     public void start() {
@@ -83,7 +103,6 @@ public final class WorkerDaemon {
         loop.start();
     }
 
-    /** Orderly shutdown (tests), a crashed process reaches the same end state. */
     public void stop() throws InterruptedException {
         running = false;
         if (loop != null) {
@@ -100,7 +119,6 @@ public final class WorkerDaemon {
         return leading;
     }
 
-    /** Embedders (the console binary) read these, the daemon stays the writer. */
     public Metrics metrics() {
         return metrics;
     }
@@ -175,6 +193,7 @@ public final class WorkerDaemon {
         lakes.clear();
         lastLogged.clear();
         lastMaintenance.clear();
+        lastLakeStats.clear();
         copyAnnounced.clear();
         premakeSkipAnnounced.clear();
         lease.release();
@@ -208,7 +227,7 @@ public final class WorkerDaemon {
             if (added > 0) {
                 Log.info("%s: registered %d new partition(s)", name, added);
             }
-            LakeStorage lake = lakeFor(table.lakeFormat());
+            LakeStorage lake = lakes.forTable(table);
 
             try {
                 new TieringWorker(catalog, lake, new JdbcHotSource(dataSource),
@@ -235,6 +254,7 @@ public final class WorkerDaemon {
             }
 
             maintainIfDue(table);
+            collectLakeStatsIfDue(table);
         } catch (Exception e) {
             Log.error("%s: cycle failed (will retry next interval): %s", name, e);
             e.printStackTrace();
@@ -269,30 +289,70 @@ public final class WorkerDaemon {
     }
 
     private void maintainIfDue(RegisteredTable table) {
+        boolean forced = catalog.consumeMaintenanceRequest(table.id());
         long now = System.currentTimeMillis();
         Long last = lastMaintenance.get(table.id());
-        if (last != null && now - last < config.maintenanceIntervalSeconds() * 1000) {
+        if (!forced && last != null && now - last < config.maintenanceIntervalSeconds() * 1000) {
             return;
         }
         lastMaintenance.put(table.id(), now);
         String name = table.schemaName() + "." + table.tableName();
         try {
-            var result = new MaintenanceWorker(catalog, lakeFor(table.lakeFormat()),
-                    config.maintenanceConfig()).runCycle(table);
-            if (!result.isNoop()) {
-                Log.info("%s: maintenance rewrote %d file(s) into %d, expired %d snapshot(s)",
-                        name, result.rewrittenFiles(), result.addedFiles(),
-                        result.expiredSnapshots());
+            MaintenanceWorker worker = new MaintenanceWorker(catalog,
+                    lakes.forTable(table), maintenanceEngine,
+                    config.defaultMaintenanceSettings());
+            if (forced) {
+                Log.info("%s: maintenance pass requested manually", name);
             }
+            var result = worker.runCycle(table, forced);
+            if (!result.isNoop()) {
+                StringBuilder did = new StringBuilder();
+                result.counters().forEach((key, value) ->
+                        did.append(' ').append(key).append('=').append(value));
+                Log.info("%s: maintenance did%s", name, did);
+            }
+            int cleaned = stagedFileJanitor.run(table, lakeTableFor(table),
+                    worker.buildPlan(table).settings());
+            if (cleaned > 0) {
+                Log.info("%s: deleted %d staged file(s) of failed loads", name, cleaned);
+            }
+            collectLakeStats(table);
         } catch (Exception e) {
             Log.error("%s: maintenance failed (will retry next due time): %s", name, e);
         }
     }
 
+    private void collectLakeStatsIfDue(RegisteredTable table) {
+        long now = System.currentTimeMillis();
+        Long last = lastLakeStats.get(table.id());
+        if (last != null && now - last < config.lakeStatsIntervalSeconds() * 1000) {
+            return;
+        }
+        try {
+            collectLakeStats(table);
+        } catch (Exception e) {
+            Log.error("%s.%s: lake stats collection failed (will retry): %s",
+                    table.schemaName(), table.tableName(), e);
+        }
+    }
+
+    private void collectLakeStats(RegisteredTable table) throws Exception {
+        lastLakeStats.put(table.id(), System.currentTimeMillis());
+        lakeStatsCollector.record(table.id().oid(),
+                table.schemaName() + "." + table.tableName(),
+                lakeTableFor(table).stats(),
+                table.maintenancePolicy().resolve(config.defaultMaintenanceSettings()));
+    }
+
+    private io.modak.lake.LakeTable lakeTableFor(RegisteredTable table) {
+        return lakes.forTable(table).table(
+                new io.modak.lake.commit.CommitterInitContext(table.id(), table.lakeTableRef()),
+                new io.modak.lake.ColdTableSpec(table.primaryKeyCols(), table.tierKeyCol()));
+    }
+
     private void cycleMirrored(RegisteredTable table) {
         String name = table.schemaName() + "." + table.tableName();
         try {
-            // No frontier means the initial copy is still in flight, pumping would have no anchor.
             if (catalog.readMirrorFrontier(table.id()).isEmpty()) {
                 if (copyAnnounced.add(table.id())) {
                     Log.info("%s: initial copy in progress, mirror cycles wait for it", name);
@@ -302,20 +362,18 @@ public final class WorkerDaemon {
             copyAnnounced.remove(table.id());
             MirrorPump pump = mirrorPumps.get(table.id());
             if (pump != null && !pump.thread().isAlive() && pump.worker().diverged()) {
-                return; // dead by destructive DDL: respawning would replay the same failure
+                return;
             }
             if (pump == null || !pump.thread().isAlive()) {
                 MirrorWorker.Settings settings = MirrorWorker.Settings.fromConfig(config);
                 if (table.heapRetentionLag().isPresent()) {
-                    // With heap retention, below-window corrections land in modak.delta.
-                    // The pump folds them so it stays the table's single lake writer.
                     settings = settings.withDeltaFold(
-                            new CompactionWorker(catalog, lakeFor(table.lakeFormat()),
+                            new CompactionWorker(catalog, lakes.forTable(table),
                                     new JdbcCompactionPolicy(dataSource, catalog,
                                             config.compactionBatchSize())),
                             config.cycleIntervalSeconds() * 1000L);
                 }
-                MirrorWorker worker = new MirrorWorker(catalog, lakeFor(table.lakeFormat()),
+                MirrorWorker worker = new MirrorWorker(catalog, lakes.forTable(table),
                         table, settings);
                 Thread t = new Thread(worker, "modak-mirror-" + name);
                 t.setDaemon(false);
@@ -332,16 +390,14 @@ public final class WorkerDaemon {
                 }
                 retentions.computeIfAbsent(table.id(),
                         id -> new MirrorRetention(dataSource, catalog)).run(table);
-                new LoadAdoptionWorker(catalog, lakeFor(table.lakeFormat())).runCycle(table);
+                new LoadAdoptionWorker(catalog, lakes.forTable(table)).runCycle(table);
             }
 
             maintainIfDue(table);
+            collectLakeStatsIfDue(table);
         } catch (Exception e) {
             Log.error("%s: mirrored cycle failed (will retry next interval): %s", name, e);
         }
     }
 
-    LakeStorage lakeFor(String format) {
-        return lakes.computeIfAbsent(format, f -> LakePlugins.load(f, config.lakeConfig()));
-    }
 }

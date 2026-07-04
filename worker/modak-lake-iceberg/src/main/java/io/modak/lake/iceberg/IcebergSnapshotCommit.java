@@ -1,7 +1,7 @@
 package io.modak.lake.iceberg;
 
 import io.modak.common.LakeSnapshotId;
-import io.modak.lake.LakeCommitResult;
+import io.modak.lake.commit.LakeCommitResult;
 import java.util.Map;
 import org.apache.iceberg.SnapshotUpdate;
 import org.apache.iceberg.Table;

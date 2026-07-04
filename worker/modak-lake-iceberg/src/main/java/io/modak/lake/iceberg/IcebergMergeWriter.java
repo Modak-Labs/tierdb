@@ -5,8 +5,8 @@ import io.modak.common.DeltaRowsBatch;
 import io.modak.common.LakeSnapshotId;
 import io.modak.common.PgValues;
 import io.modak.common.RowBatchData;
-import io.modak.lake.LakeCommitResult;
-import io.modak.lake.MergeWriter;
+import io.modak.lake.commit.LakeCommitResult;
+import io.modak.lake.commit.MergeWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,10 +33,8 @@ import org.apache.iceberg.types.Types;
 
 /**
  * Folds a {@link DeltaRowsBatch} into the Iceberg base as one {@code RowDelta}:
- * equality deletes on the PK plus data files with the upsert images, landing at
- * one sequence number, exactly newest-wins upsert semantics. Deletes land in the
- * partition of {@link DeltaRowsBatch.Entry#lakeTierKey()}, so a row that moved
- * tiers is removed where the lake actually holds it.
+ * equality deletes on the PK plus data files with the upsert images,
+ * landing at one sequence number.
  */
 final class IcebergMergeWriter implements MergeWriter {
 
@@ -86,7 +84,6 @@ final class IcebergMergeWriter implements MergeWriter {
             return LakeCommitResult.committedIsReadable(
                     new LakeSnapshotId(committed.sequenceNumber()), IcebergPublish.props(table));
         } catch (RuntimeException e) {
-            // A failed fold re-runs and its written files are orphans, remove delete files too.
             List<String> orphaned = new ArrayList<>();
             deletes.forEach(f -> orphaned.add(f.path().toString()));
             upserts.forEach(f -> orphaned.add(f.path().toString()));
@@ -169,7 +166,6 @@ final class IcebergMergeWriter implements MergeWriter {
         return indexes;
     }
 
-    // Legacy single-column tombstones carry no row image, parse the pk text instead.
     private Object pkValue(DeltaRowsBatch.Entry e, Types.NestedField field, int rowIndex)
             throws IOException {
         if (e.row() != null && e.row()[rowIndex] != null) {

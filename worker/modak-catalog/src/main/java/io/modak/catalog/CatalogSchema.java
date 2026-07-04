@@ -11,23 +11,20 @@ import java.util.Map;
 import javax.sql.DataSource;
 
 /**
- * Versioned {@code modak.*} schema management: a fresh database gets the full
- * {@code /modak/catalog.sql} baseline (always the latest shape), an older one
- * gets the pending {@code /modak/migrations/V*.sql} in order, and a NEWER one
- * makes this (older) worker refuse to run. Serialized by an advisory lock.
+ * Versioned {@code modak.*} schema management: a fresh database gets the
+ * full {@code /modak/catalog.sql} baseline, an older one gets the pending
+ * {@code /modak/migrations/V*.sql} in order.
  */
 public final class CatalogSchema {
 
     public static final String RESOURCE = "/modak/catalog.sql";
     public static final int CURRENT_VERSION = 1;
 
-    // No schema_meta = V1 baseline.
     private static final int LEGACY_VERSION = 1;
 
-    // Post-release schema changes add /modak/migrations/V*.sql here and bump the version.
     private static final Map<Integer, String> MIGRATIONS = Map.of();
 
-    private static final long MIGRATION_LOCK_KEY = 0x6d6f64616b31L; // distinct from the leader lease
+    private static final long MIGRATION_LOCK_KEY = 0x6d6f64616b31L;
 
     private CatalogSchema() {}
 
@@ -56,7 +53,6 @@ public final class CatalogSchema {
         }
     }
 
-    /** -1 = no modak schema at all, {@link #LEGACY_VERSION} = schema without a stamp. */
     private static int installedVersion(Statement s) throws SQLException {
         try (ResultSet rs = s.executeQuery(
                 "SELECT 1 FROM pg_namespace WHERE nspname = 'modak'")) {
