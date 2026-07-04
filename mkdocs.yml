@@ -2,11 +2,9 @@ site_name: modak
 site_description: >-
   Tier-aware data federation between Postgres and Apache Iceberg, behind
   one SQL surface that stays real time and consistent.
-site_url: https://addu390.github.io/modak/
-exclude_docs: |
-  video/
-repo_url: https://github.com/addu390/modak
-repo_name: addu390/modak
+site_url: https://modak-labs.github.io/modak/
+repo_url: https://github.com/Modak-Labs/modak
+repo_name: Modak-Labs/modak
 
 theme:
   name: material

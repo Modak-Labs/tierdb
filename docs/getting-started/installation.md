@@ -9,7 +9,7 @@ Postgres you run yourself, from the packaged release artifacts.
 - Postgres 16 or 17 with the [pg_duckdb](https://github.com/duckdb/pg_duckdb)
   extension installed.
 - The `modak` extension tarball for your Postgres version and platform, from
-  the [releases page](https://github.com/addu390/modak/releases).
+  the [releases page](https://github.com/Modak-Labs/modak/releases).
 - Java 17 or newer for the worker, plus `modak-worker.jar` (or
   `modak-console.jar` for the version with the web console) from the same
   release.

@@ -1,8 +1,8 @@
 # Contributing
 
 Thanks for helping out. Bug reports and feature requests go through
-[issues](https://github.com/addu390/modak/issues), questions and ideas through
-[discussions](https://github.com/addu390/modak/discussions). For anything
+[issues](https://github.com/Modak-Labs/modak/issues), questions and ideas through
+[discussions](https://github.com/Modak-Labs/modak/discussions). For anything
 non-trivial, open an issue or discussion before writing code so the approach
 can be agreed on first.
 
