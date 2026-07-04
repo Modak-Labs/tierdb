@@ -6,8 +6,7 @@ Tier-aware data federation between Postgres and Apache Iceberg. Modak knows whic
 
 Recent rows live in Postgres, history lives in Iceberg, and plain SQL works against the whole timeline: `SELECT`, `INSERT`, `UPDATE`, and `DELETE` reach any row, wherever it lives. Both tiers stay real, independently usable systems: an unforked Postgres you run OLTP on, and a standard Iceberg warehouse any engine can read. Modak owns only the seam between them, and the [protocol](https://modak-labs.github.io/modak/reference/seam/) is public.
 
-https://github.com/user-attachments/assets/09966acf-b3d7-4a29-bd57-12bad806772d
-
+https://github.com/user-attachments/assets/dc666d8b-ade7-4c56-b5a3-f4bf889d8806
 
 Tables run **tiered** (Postgres keeps only the recent partitions) or **mirrored** (Postgres keeps everything while CDC trails it into the lake). [Choosing a mode](https://modak-labs.github.io/modak/modes/choosing/) walks the decision, and [the contract](https://modak-labs.github.io/modak/modes/contract/) states exactly what each mode supports.
 
