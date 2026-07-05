@@ -16,6 +16,11 @@
   --md-primary-fg-color: #ffffff;
   --md-primary-bg-color: #1a1a1a;
   --md-primary-bg-color--light: #666666;
+  --md-footer-bg-color: #ffffff;
+  --md-footer-bg-color--dark: #ffffff;
+  --md-footer-fg-color: #1a1a1a;
+  --md-footer-fg-color--light: #666666;
+  --md-footer-fg-color--lighter: #999999;
   --modak-line: #e0e0e0;
 }
 
@@ -55,6 +60,7 @@
   --md-code-bg-color: #181818;
   --md-typeset-a-color: #e6e6e6;
   --md-footer-bg-color: #141414;
+  --md-footer-bg-color--dark: #141414;
   --md-primary-bg-color: #e6e6e6;
   --md-primary-bg-color--light: #999999;
   --modak-line: #333333;
@@ -141,6 +147,10 @@
 .md-header,
 .md-tabs {
   border-bottom: 1px solid var(--modak-line);
+}
+
+.md-footer-meta {
+  border-top: 1px solid var(--modak-line);
 }
 
 .md-typeset code {
