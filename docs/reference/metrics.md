@@ -1,8 +1,6 @@
 # Metrics
 
-Prometheus text format on `/metrics`, served by the headless worker (set
-`MODAK_METRICS_PORT`) and by the console binary (on `MODAK_CONSOLE_PORT`)
-identically.
+Prometheus text format on `/metrics`, served by the headless worker (set `MODAK_METRICS_PORT`) and by the console binary (on `MODAK_CONSOLE_PORT`) identically.
 
 ## Daemon
 
@@ -29,11 +27,7 @@ identically.
 
 ## Lake health
 
-One gauge per counter the format plugin reports into `modak.lake_stats`,
-republished as `modak_lake_<counter>{table}`. The counter names are
-format-owned. Iceberg reports `files`, `delete_files`, `bytes`, `records`,
-`snapshots`, `manifests`, and `delete_ratio`. `modak_lake_warnings{table}` is
-the number of active health warnings, alert on it being nonzero.
+One gauge per counter the format plugin reports into `modak.lake_stats`, republished as `modak_lake_<counter>{table}`. The counter names are format-owned. Iceberg reports `files`, `delete_files`, `bytes`, `records`, `snapshots`, `manifests`, and `delete_ratio`. `modak_lake_warnings{table}` is the number of active health warnings, alert on it being nonzero.
 
 ## Per replication slot
 

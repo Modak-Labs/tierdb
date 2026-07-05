@@ -81,6 +81,7 @@ nav:
       - Overview: integrations/index.md
       - Spark: integrations/spark.md
   - Operations:
+      - Deployment modes: operations/deployment.md
       - Production deployment: operations/production.md
       - Deploying on AWS: operations/aws.md
       - Day-2 operations: operations/day-2.md

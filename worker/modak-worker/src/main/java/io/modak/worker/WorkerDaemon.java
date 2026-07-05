@@ -143,6 +143,12 @@ public final class WorkerDaemon {
                 return;
             } catch (Exception e) {
                 Log.error("daemon loop failed (re-campaigning): %s", e);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
             } finally {
                 leading = false;
                 metrics.gauge("modak_leader", 0);

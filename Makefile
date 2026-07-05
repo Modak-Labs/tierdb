@@ -82,6 +82,16 @@ verify-worker: ## mvn verify the reactor
 clean-worker:
 	cd $(WORKER_DIR) && $(MVN) $(MVN_FLAGS) clean
 
+.PHONY: package-embedded
+package-embedded: ## Console jar + jlink runtime bundle for embedded mode (worker/target/modak-embedded)
+	cd $(WORKER_DIR) && $(MVN) $(MVN_FLAGS) -DskipTests package
+	rm -rf $(WORKER_DIR)/target/modak-embedded
+	mkdir -p $(WORKER_DIR)/target/modak-embedded
+	jlink --add-modules "$$(cat $(WORKER_DIR)/jlink-modules.txt)" \
+		--strip-debug --no-man-pages --no-header-files --compress=zip-6 \
+		--output $(WORKER_DIR)/target/modak-embedded/runtime
+	cp $(WORKER_DIR)/modak-console/target/modak-console.jar $(WORKER_DIR)/target/modak-embedded/
+
 # ---------------------------------------------------------------------------
 # Meta
 # ---------------------------------------------------------------------------

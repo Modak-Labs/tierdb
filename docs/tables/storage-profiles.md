@@ -1,14 +1,8 @@
 # Storage profiles
 
-A storage profile is a named warehouse binding: a warehouse root, the lake
-format, non-secret config overrides, and a credential reference. Tables pick a
-profile at registration, so one deployment can spread tables across buckets,
-accounts, regions, or entirely different object stores.
+A storage profile is a named warehouse binding: a warehouse root, the lake format, non-secret config overrides, and a credential reference. Tables pick a profile at registration, so one deployment can spread tables across buckets, accounts, regions, or entirely different object stores.
 
-Every deployment starts with a seeded `default` profile whose warehouse and
-format are blank, meaning "resolve from the worker's environment"
-(`MODAK_WAREHOUSE`, `MODAK_LAKE_FORMAT`, `MODAK_LAKE_PROPS`). Single-warehouse
-deployments never need to touch profiles.
+Every deployment starts with a seeded `default` profile whose warehouse and format are blank, meaning "resolve from the worker's environment" (`MODAK_WAREHOUSE`, `MODAK_LAKE_FORMAT`, `MODAK_LAKE_PROPS`). Single-warehouse deployments never need to touch profiles.
 
 ## Creating a profile
 
@@ -30,8 +24,7 @@ modak-worker profile list
 | `--credentials` | Credential reference (see below). Omit to use the worker's default credentials |
 | `--default` | Make this the default profile for new registrations |
 
-The console can also list and create profiles
-(`GET`/`POST /api/v1/storage-profiles`).
+The console can also list and create profiles (`GET`/`POST /api/v1/storage-profiles`).
 
 ## Using a profile
 
@@ -39,30 +32,21 @@ The console can also list and create profiles
 modak-worker register --table public.events --pk id --tier-key ts --profile analytics
 ```
 
-The table's lake lives under the profile's warehouse from then on. The
-profile is recorded in `modak.tables.storage_profile` and every lake-touching
-path (tiering, compaction, ingest, stream load, maintenance, verify) resolves
-storage through it.
+The table's lake lives under the profile's warehouse from then on. The profile is recorded in `modak.tables.storage_profile` and every lake-touching path (tiering, compaction, ingest, stream load, maintenance, verify) resolves storage through it.
 
 ## Config resolution
 
 A table's effective lake config is layered, later layers win:
 
-1. The worker's environment (`MODAK_WAREHOUSE`, `MODAK_S3_*`,
-   `MODAK_CATALOG_*`, `MODAK_LAKE_PROPS`).
+1. The worker's environment (`MODAK_WAREHOUSE`, `MODAK_S3_*`, `MODAK_CATALOG_*`, `MODAK_LAKE_PROPS`).
 2. The profile's warehouse and `--config` overrides.
 3. The credential fragment named by `--credentials`.
 
-Config is an opaque `key=value` map interpreted by the format plugin, not by
-Modak, so a profile can target any store the plugin's IO layer supports: S3,
-GCS, Azure, HDFS, or a local path.
+Config is an opaque `key=value` map interpreted by the format plugin, not by Modak, so a profile can target any store the plugin's IO layer supports: S3, GCS, Azure, HDFS, or a local path.
 
 ## Credentials
 
-Secrets never enter the catalog. A profile stores only a *reference*:
-`--credentials analytics` means the worker resolves the environment variable
-`MODAK_CREDENTIALS_ANALYTICS` at use time, semicolon-separated `key=value`
-pairs merged over the config:
+Secrets never enter the catalog. A profile stores only a *reference*: `--credentials analytics` means the worker resolves the environment variable `MODAK_CREDENTIALS_ANALYTICS` at use time, semicolon-separated `key=value` pairs merged over the config:
 
 ```bash
 # S3-compatible
@@ -72,15 +56,11 @@ MODAK_CREDENTIALS_ANALYTICS='s3.access-key=AKIA...;s3.secret-key=...;s3.region=u
 MODAK_CREDENTIALS_GCSEU='hadoop.fs.gs.auth.service.account.json.keyfile=/secrets/gcs.json'
 ```
 
-A worker that lacks the referenced variable fails loudly the first time it
-touches a table on that profile. A blank value removes an inherited key, e.g.
-`s3.access-key=` drops the default credentials and falls back to the
-provider's ambient chain (instance roles, workload identity).
+A worker that lacks the referenced variable fails loudly the first time it touches a table on that profile. A blank value removes an inherited key, e.g. `s3.access-key=` drops the default credentials and falls back to the provider's ambient chain (instance roles, workload identity).
 
 ## The read path
 
-Workers write; `iceberg_scan()` inside Postgres reads, and DuckDB needs its
-own secret per warehouse. Register one scoped secret per profile:
+Workers write; `iceberg_scan()` inside Postgres reads, and DuckDB needs its own secret per warehouse. Register one scoped secret per profile:
 
 ```sql
 SELECT duckdb.create_simple_secret(
@@ -91,7 +71,4 @@ SELECT duckdb.create_simple_secret(
 );
 ```
 
-The compose stack automates this: any `MODAK_READ_SECRET_<NAME>` environment
-variable on the `postgres` service is parsed as `key=value` pairs and passed
-through to `duckdb.create_simple_secret()` at init, so any provider DuckDB
-supports works the same way.
+The compose stack automates this: any `MODAK_READ_SECRET_<NAME>` environment variable on the `postgres` service is parsed as `key=value` pairs and passed through to `duckdb.create_simple_secret()` at init, so any provider DuckDB supports works the same way.

@@ -1,7 +1,6 @@
 # Configuration
 
-The worker and console are configured entirely through environment variables.
-The same binary points at any deployment shape.
+The worker and console are configured entirely through environment variables. The same binary points at any deployment shape.
 
 ## Connection
 
@@ -16,9 +15,7 @@ The same binary points at any deployment shape.
 | `MODAK_S3_SSL` | `false` | TLS to the S3 endpoint |
 | `MODAK_CREDENTIALS_<REF>` | unset | Named credential set for storage profiles: `key=value` pairs, `;`-separated, merged into the lake config of any profile created with `--credentials <ref>`. See [Storage profiles](../tables/storage-profiles.md) |
 
-The `MODAK_WAREHOUSE`/`MODAK_S3_*` settings define the default warehouse.
-Deployments with more than one warehouse layer
-[storage profiles](../tables/storage-profiles.md) on top.
+The `MODAK_WAREHOUSE`/`MODAK_S3_*` settings define the default warehouse. Deployments with more than one warehouse layer [storage profiles](../tables/storage-profiles.md) on top.
 
 ## Worker behaviour
 
@@ -38,9 +35,7 @@ Deployments with more than one warehouse layer
 
 ## Lake maintenance
 
-These are the worker-wide defaults. Any of the equivalent settings can be
-overridden per table with `modak-worker policy`, see
-[Lake maintenance](../operations/lake-maintenance.md).
+These are the worker-wide defaults. Any of the equivalent settings can be overridden per table with `modak-worker policy`, see [Lake maintenance](../operations/lake-maintenance.md).
 
 | Env var | Default | Meaning |
 |---------|---------|---------|
@@ -65,12 +60,7 @@ overridden per table with `modak-worker policy`, see
 
 ## Iceberg catalog
 
-By default the lake is path-based: each table lives directly under
-`MODAK_WAREHOUSE` with no catalog service. Set `MODAK_CATALOG_URI` and tables
-are instead created and loaded through an Iceberg REST catalog as
-`<namespace>.<schema>_<table>`. The read path is identical either way: every
-commit publishes the table's `metadata_location` into `modak.tables`, and
-DuckDB scans that file directly.
+By default the lake is path-based: each table lives directly under `MODAK_WAREHOUSE` with no catalog service. Set `MODAK_CATALOG_URI` and tables are instead created and loaded through an Iceberg REST catalog as `<namespace>.<schema>_<table>`. The read path is identical either way: every commit publishes the table's `metadata_location` into `modak.tables`, and DuckDB scans that file directly.
 
 | Env var | Default | Meaning |
 |---------|---------|---------|
@@ -82,14 +72,10 @@ DuckDB scans that file directly.
 
 ## Lake properties passthrough
 
-Everything else a format supports flows through `MODAK_LAKE_PROPS`:
-semicolon-separated `key=value` pairs handed verbatim to the format plugin. The
-Iceberg plugin interprets three prefixes:
+Everything else a format supports flows through `MODAK_LAKE_PROPS`: semicolon-separated `key=value` pairs handed verbatim to the format plugin. The Iceberg plugin interprets three prefixes:
 
-- `iceberg.catalog.<key>`: an Iceberg catalog property (OAuth2, custom
-  headers, `io-impl`, ...).
-- `iceberg.table.<key>`: a table property stamped at creation (`write.*`,
-  `commit.*`, `history.*` families).
+- `iceberg.catalog.<key>`: an Iceberg catalog property (OAuth2, custom headers, `io-impl`, ...).
+- `iceberg.table.<key>`: a table property stamped at creation (`write.*`, `commit.*`, `history.*` families).
 - `hadoop.<key>`: passed to the Hadoop configuration backing file IO.
 
 ```bash

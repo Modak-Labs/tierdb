@@ -18,7 +18,15 @@ public final class Main {
         String command = args.length > 0 ? args[0] : "run";
         switch (command) {
             case "run" -> {
-                new WorkerDaemon(config).start();
+                WorkerDaemon daemon = new WorkerDaemon(config);
+                daemon.start();
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    try {
+                        daemon.stop();
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, "modak-shutdown"));
                 Thread.currentThread().join();
             }
             case "register" -> TableRegistrar.run(config, args);

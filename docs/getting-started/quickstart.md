@@ -1,13 +1,11 @@
 # Quickstart
 
-Run the full Modak loop locally in about ten minutes: a Postgres with the
-extension, MinIO standing in for S3, the worker, and a scripted walkthrough.
+Run the full Modak loop locally in about ten minutes: a Postgres with the extension, MinIO standing in for S3, the worker, and a scripted walkthrough.
 
 ## Prerequisites
 
 - Docker with the compose plugin.
-- About 4 GB free for the images. The first build compiles the extension and
-  takes a few minutes.
+- About 4 GB free for the images. The first build compiles the extension and takes a few minutes.
 
 ## Start the stack
 
@@ -30,15 +28,7 @@ Three services come up:
 ./example/run.sh
 ```
 
-The walkthrough registers three tables and asserts each step. A tiered events
-table has its old partitions moved to Iceberg and dropped from Postgres while
-a plain `SELECT` still sees every row. Corrections get folded by compaction.
-A mirrored vehicles table takes plain DML that CDC trails into Iceberg and
-reads back from the lake. The lifecycle step kills an initial copy mid-flight
-and watches it resume from its journal, runs `verify` to prove heap and lake
-match, and finishes with `unregister` leaving nothing behind. Each step is a
-separate script under `example/steps/` if you want to follow along one concept
-at a time.
+The walkthrough registers three tables and asserts each step. A tiered events table has its old partitions moved to Iceberg and dropped from Postgres while a plain `SELECT` still sees every row. Corrections get folded by compaction. A mirrored vehicles table takes plain DML that CDC trails into Iceberg and reads back from the lake. The lifecycle step kills an initial copy mid-flight and watches it resume from its journal, runs `verify` to prove heap and lake match, and finishes with `unregister` leaving nothing behind. Each step is a separate script under `example/steps/` if you want to follow along one concept at a time.
 
 ## Poke around
 
@@ -59,8 +49,7 @@ SELECT * FROM public.events ORDER BY id;       -- raw heap: only the hot slice
 
 ## Register your own table
 
-Tiered mode needs `PARTITION BY RANGE` on the tier key, a timestamp, date,
-or integer column. Mirrored mode takes any table with a primary key:
+Tiered mode needs `PARTITION BY RANGE` on the tier key, a timestamp, date, or integer column. Mirrored mode takes any table with a primary key:
 
 ```bash
 docker compose run --rm worker register \
@@ -69,8 +58,7 @@ docker compose run --rm worker register \
     --table public.my_dim --pk id --tier-key updated_at --mode mirrored   # mirrored
 ```
 
-See [Registering tables](../tables/registering-tables.md) for modes, retention,
-and composite keys.
+See [Registering tables](../tables/registering-tables.md) for modes, retention, and composite keys.
 
 ## Teardown
 
@@ -79,6 +67,4 @@ docker compose down -v    # removes all data
 ```
 
 !!! note
-    The compose stack is a test harness, not a production topology. The same
-    worker binary points at your managed Postgres and real object store through
-    the same env vars. See [Production deployment](../operations/production.md).
+    The compose stack is a test harness, not a production topology. The same worker binary points at your managed Postgres and real object store through the same env vars. See [Production deployment](../operations/production.md).

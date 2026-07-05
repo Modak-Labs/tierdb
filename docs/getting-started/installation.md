@@ -1,30 +1,22 @@
 # Installation
 
-The [quickstart](quickstart.md) runs everything in Docker and configures all
-of this for you. This page is the manual path: installing Modak onto a
-Postgres you run yourself, from the packaged release artifacts.
+The [quickstart](quickstart.md) runs everything in Docker and configures all of this for you. This page is the manual path: installing Modak onto a Postgres you run yourself, from the packaged release artifacts.
 
 ## What you need
 
-- Postgres 16 or 17 with the [pg_duckdb](https://github.com/duckdb/pg_duckdb)
-  extension installed.
-- The `modak` extension tarball for your Postgres version and platform, from
-  the [releases page](https://github.com/Modak-Labs/modak/releases).
-- Java 17 or newer for the worker, plus `modak-worker.jar` (or
-  `modak-console.jar` for the version with the web console) from the same
-  release.
+- Postgres 16 or 17 with the [pg_duckdb](https://github.com/duckdb/pg_duckdb) extension installed.
+- The `modak` extension tarball for your Postgres version and platform, from the [releases page](https://github.com/Modak-Labs/modak/releases).
+- Java 17 or newer for the worker, plus `modak-worker.jar` (or `modak-console.jar` for the version with the web console) from the same release.
 
 ## Install the extension
 
-Each tarball mirrors the layout `pg_config` reports, so it extracts onto the
-filesystem root:
+Each tarball mirrors the layout `pg_config` reports, so it extracts onto the filesystem root:
 
 ```bash
 sudo tar -xzf modak-0.1.0-pg17-linux-x86_64.tar.gz -C /
 ```
 
-That places `modak.so` in the library directory and `modak.control` plus the
-SQL script in the extension directory.
+That places `modak.so` in the library directory and `modak.control` plus the SQL script in the extension directory.
 
 ## Configure Postgres
 
@@ -35,8 +27,7 @@ shared_preload_libraries = 'pg_duckdb, modak'   # pg_duckdb first
 wal_level = logical                             # mirrored tables need pgoutput
 ```
 
-The order matters. Listing `pg_duckdb` first means modak's planner hook runs
-first, which transparent reads depend on.
+The order matters. Listing `pg_duckdb` first means modak's planner hook runs first, which transparent reads depend on.
 
 ## Set up the database
 
@@ -59,8 +50,7 @@ ALTER SYSTEM SET duckdb.max_workers_per_postgres_scan = 0;
 ALTER SYSTEM SET duckdb.unsafe_allow_execution_inside_functions = 'on';
 ```
 
-Give DuckDB credentials for the warehouse, so `iceberg_scan()` can read
-`s3://` locations. The endpoint is host and port with no scheme:
+Give DuckDB credentials for the warehouse, so `iceberg_scan()` can read `s3://` locations. The endpoint is host and port with no scheme:
 
 ```sql
 SELECT duckdb.create_simple_secret(
@@ -74,14 +64,11 @@ SELECT duckdb.create_simple_secret(
 );
 ```
 
-Tables on additional warehouses (see
-[Storage profiles](../tables/storage-profiles.md)) each need a secret scoped
-to their warehouse root (`scope := 's3://analytics-lake/'`).
+Tables on additional warehouses (see [Storage profiles](../tables/storage-profiles.md)) each need a secret scoped to their warehouse root (`scope := 's3://analytics-lake/'`).
 
 ## Run the worker
 
-The worker is a plain jar pointed at your database and object store through
-env vars:
+The worker is a plain jar pointed at your database and object store through env vars:
 
 ```bash
 MODAK_PG_URL='jdbc:postgresql://db.internal:5432/app' \
@@ -92,7 +79,4 @@ MODAK_S3_REGION=us-east-1 \
 java -jar modak-worker.jar run
 ```
 
-It creates the `modak.*` catalog schema on first start. From here,
-[register a table](../tables/registering-tables.md) and you are running.
-For roles, TLS, WAL safety, and everything else a shared database needs, see
-[Production deployment](../operations/production.md).
+It creates the `modak.*` catalog schema on first start. From here, [register a table](../tables/registering-tables.md) and you are running. For roles, TLS, WAL safety, and everything else a shared database needs, see [Production deployment](../operations/production.md).

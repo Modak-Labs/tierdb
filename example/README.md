@@ -7,9 +7,7 @@ docker compose up -d --build   # from the repo root, once
 ./example/run.sh               # the whole walkthrough, ~3 minutes
 ```
 
-Every step asserts its results and fails fast, so this doubles as a smoke
-test. Steps are re-runnable and can be run individually, though later steps
-assume the earlier ones ran.
+Every step asserts its results and fails fast, so this doubles as a smoke test. Steps are re-runnable and can be run individually, though later steps assume the earlier ones ran.
 
 | Step | What it shows |
 |------|---------------|
@@ -27,11 +25,9 @@ The tables live in `datasets/`:
 - `vehicles.sql`: an ordinary OLTP table (the mirrored table).
 - `telemetry.sql`: 20k rows for the kill-and-resume copy.
 - `readings.sql`: a timestamptz time series with daily partitions.
-- `live.sql`: two real-scale time series (hourly partitions, 24h of history)
-  for `live.sh`, one keyed on `timestamptz` and one on epoch `bigint`.
+- `live.sql`: two real-scale time series (hourly partitions, 24h of history) for `live.sh`, one keyed on `timestamptz` and one on epoch `bigint`.
 
-To run against the Iceberg REST catalog stack instead of the default
-path-based warehouse:
+To run against the Iceberg REST catalog stack instead of the default path-based warehouse:
 
 ```bash
 EXAMPLE_REST=1 ./example/run.sh
@@ -39,18 +35,11 @@ EXAMPLE_REST=1 ./example/run.sh
 
 ## Keeping it running
 
-`run.sh` proves the loop once and cleans up after itself. `live.sh` is the
-same loop left running, so [the console](http://localhost:9090) has something
-live to show:
+`run.sh` proves the loop once and cleans up after itself. `live.sh` is the same loop left running, so [the console](http://localhost:9090) has something live to show:
 
 ```bash
 ./example/live.sh          # setup (idempotent) + stream until Ctrl-C
 ./example/live.sh reset    # offboard the live tables
 ```
 
-It registers `sensor_readings` on the default warehouse and `trades` on the
-`analytics` storage profile (a second bucket with its own credentials), seeds
-24 hours of history that tiers into Iceberg, then streams inserts at the
-present with a correction to a cold row every ~30s. Watch cutlines advance,
-partitions premake and drop, delta folds, lake commits, and run maintenance
-from the table page while it flows. Re-running resumes the stream.
+It registers `sensor_readings` on the default warehouse and `trades` on the `analytics` storage profile (a second bucket with its own credentials), seeds 24 hours of history that tiers into Iceberg, then streams inserts at the present with a correction to a cold row every ~30s. Watch cutlines advance, partitions premake and drop, delta folds, lake commits, and run maintenance from the table page while it flows. Re-running resumes the stream.

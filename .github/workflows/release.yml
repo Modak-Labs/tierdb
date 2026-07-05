@@ -80,8 +80,42 @@ jobs:
             worker/modak-console/target/modak-console.jar
           if-no-files-found: error
 
+  embedded:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build the embedded bundle (console jar + jlink runtime)
+        run: make package-embedded MVN_FLAGS="-B -q"
+
+      - name: Create tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCH="$(uname -m)"
+          OUT="modak-embedded-${VERSION}-linux-${ARCH}"
+          tar -C worker/target -czf "${OUT}.tar.gz" modak-embedded
+          echo "TARBALL=${OUT}.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: embedded-${{ matrix.runner }}
+          path: ${{ env.TARBALL }}
+          if-no-files-found: error
+
   release:
-    needs: [extension, worker]
+    needs: [extension, worker, embedded]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8

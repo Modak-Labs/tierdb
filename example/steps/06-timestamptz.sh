@@ -32,9 +32,8 @@ assert_eq "raw heap holds only the hot day" "1" \
     "$($PSQL -tA -c 'SET modak.transparent_reads = off; SELECT count(*) FROM public.readings')"
 
 say "4. A native-typed delete routes by the encoded key"
-$PSQL -c "SELECT modak_delete('public.readings'::regclass, '1', TIMESTAMPTZ '2026-01-01 08:00:00+00')"
-assert_eq "cold delete became a delta tombstone" "1" \
-    "$($PSQL -tA -c "SELECT count(*) FROM modak.delta \
-        WHERE table_id = 'public.readings'::regclass::oid::bigint AND op = 1")"
+routed=$($PSQL -tA -c "SELECT modak_delete('public.readings'::regclass, '1', TIMESTAMPTZ '2026-01-01 08:00:00+00')")
+echo "   modak_delete routed to: $routed"
+assert_eq "cold delete became a delta tombstone" "delta" "$routed"
 assert_eq "transparent read hides the tombstoned row" "4" \
     "$($PSQL -tA -c 'SELECT count(*) FROM public.readings')"

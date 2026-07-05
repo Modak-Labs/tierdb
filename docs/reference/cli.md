@@ -1,8 +1,6 @@
 # CLI
 
-Both jars expose the same commands (`modak-console.jar` is a superset that adds
-the web console to `run`). All wiring comes from
-[environment variables](configuration.md).
+Both jars expose the same commands (`modak-console.jar` is a superset that adds the web console to `run`). All wiring comes from [environment variables](configuration.md).
 
 ```
 modak-worker [run]
@@ -21,9 +19,7 @@ modak-worker profile    create --name <name> --warehouse <root> [--format <plugi
 
 ## `run` (default)
 
-Hosts the daemon: leader campaign, tiering, mirror pumps, compaction, status
-sweep, lake maintenance. Runs until killed. Multiple instances against the
-same database form an HA group where exactly one leads.
+Hosts the daemon: leader campaign, tiering, mirror pumps, compaction, status sweep, lake maintenance. Runs until killed. Multiple instances against the same database form an HA group where exactly one leads.
 
 ## `register`
 
@@ -43,36 +39,23 @@ Onboards a table. See [Registering tables](../tables/registering-tables.md).
 | `--lake-partition` | Temporal keys only: lake layout `hour`, `day` (default), `month`, `year`, or `none` |
 | `--profile` | Storage profile the table's lake lives on. Omit for the default profile. See [Storage profiles](../tables/storage-profiles.md) |
 
-Re-running `register` is safe: a completed registration is a no-op, an
-interrupted mirrored initial copy resumes from its journal.
+Re-running `register` is safe: a completed registration is a no-op, an interrupted mirrored initial copy resumes from its journal.
 
 ## `unregister`
 
-Offboards a table: catalog rows (cascade), replication slot, publication, and
-`REPLICA IDENTITY` reset. `--drop-lake` also purges the Iceberg table. Without
-it the lake table survives, which for tiered tables is the only copy of
-reclaimed rows.
+Offboards a table: catalog rows (cascade), replication slot, publication, and `REPLICA IDENTITY` reset. `--drop-lake` also purges the Iceberg table. Without it the lake table survives, which for tiered tables is the only copy of reclaimed rows.
 
 ## `verify`
 
-Heap-vs-lake audit that exits non-zero on mismatch. See
-[Operations](../operations/day-2.md#verify).
+Heap-vs-lake audit that exits non-zero on mismatch. See [Operations](../operations/day-2.md#verify).
 
 ## `ingest`
 
-Commits rows straight into a table's lake as one atomic upsert, bypassing
-`modak.delta`. Input is staged Parquet (`--file`, adopted by reference) or
-JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered
-tables and mirrored tables with heap retention. Every row must be cold: below
-the cut-line, at or above the retention line. See
-[Bulk ingestion](../ingestion/bulk-ingestion.md).
+Commits rows straight into a table's lake as one atomic upsert, bypassing `modak.delta`. Input is staged Parquet (`--file`, adopted by reference) or JSONL records (`--jsonl`, the worker writes the Parquet). Applies to tiered tables and mirrored tables with heap retention. Every row must be cold: below the cut-line, at or above the retention line. See [Bulk ingestion](../ingestion/bulk-ingestion.md).
 
 ## `policy`
 
-Views or edits a table's maintenance policy, the per-table overrides layered
-over the worker's defaults. With no edit flags it prints every setting
-maintenance will run with and where each comes from. Keys belong to the lake
-format, see [Lake maintenance](../operations/lake-maintenance.md).
+Views or edits a table's maintenance policy, the per-table overrides layered over the worker's defaults. With no edit flags it prints every setting maintenance will run with and where each comes from. Keys belong to the lake format, see [Lake maintenance](../operations/lake-maintenance.md).
 
 ```bash
 modak-worker policy --table public.events
@@ -82,19 +65,11 @@ modak-worker policy --table public.events --reset
 
 ## `maintain`
 
-Requests an out-of-schedule maintenance pass by filing a row in
-`modak.maintenance_requests`. The leader claims it on its next cycle, the
-command waits for the journal entry and prints what the pass did
-(`--no-wait` files and returns). See
-[Lake maintenance](../operations/lake-maintenance.md#forcing-a-pass).
+Requests an out-of-schedule maintenance pass by filing a row in `modak.maintenance_requests`. The leader claims it on its next cycle, the command waits for the journal entry and prints what the pass did (`--no-wait` files and returns). See [Lake maintenance](../operations/lake-maintenance.md#forcing-a-pass).
 
 ## `profile`
 
-Lists or creates storage profiles, the named warehouse bindings tables
-register against. `create` takes `--name`, `--warehouse`, and optionally
-`--format`, `--config` (semicolon-separated `key=value` overrides),
-`--credentials` (a reference resolved from the worker's environment, never a
-key), and `--default`. See [Storage profiles](../tables/storage-profiles.md).
+Lists or creates storage profiles, the named warehouse bindings tables register against. `create` takes `--name`, `--warehouse`, and optionally `--format`, `--config` (semicolon-separated `key=value` overrides), `--credentials` (a reference resolved from the worker's environment, never a key), and `--default`. See [Storage profiles](../tables/storage-profiles.md).
 
 ```bash
 modak-worker profile create --name analytics \

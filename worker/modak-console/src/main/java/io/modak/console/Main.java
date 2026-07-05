@@ -33,6 +33,13 @@ public final class Main {
         Log.info("console on :%d (metrics at /metrics, sql %s, stream load %s)", server.port(),
                 config.consoleSql() ? "enabled" : "disabled",
                 load != null ? "enabled" : "disabled");
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                daemon.stop();
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }, "modak-shutdown"));
         Thread.currentThread().join();
     }
 

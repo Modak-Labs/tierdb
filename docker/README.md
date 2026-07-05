@@ -1,10 +1,6 @@
 # Local test stack
 
-A docker compose harness for experimenting with Modak end to end. This is not
-a production topology. MinIO stands in for S3 and one worker container stands
-in for wherever your workers would really run. In production the same worker
-binary points at your managed Postgres and real object store via the same env
-vars, see the [production deployment guide](../docs/guides/production.md).
+A docker compose harness for experimenting with Modak end to end. This is not a production topology. MinIO stands in for S3 and one worker container stands in for wherever your workers would really run. In production the same worker binary points at your managed Postgres and real object store via the same env vars, see the [production deployment guide](../docs/guides/production.md).
 
 | Service    | Role                                                                   |
 |------------|------------------------------------------------------------------------|
@@ -34,23 +30,17 @@ CLI commands run through the worker service, e.g.:
 docker compose run --rm worker register --table public.my_table --pk id --tier-key event_time
 ```
 
-Everything else (table modes, reading, configuration, operations) is in the
-[docs](../docs/index.md).
+Everything else (table modes, reading, configuration, operations) is in the [docs](../docs/index.md).
 
 ## Images
 
-`docker/Dockerfile.postgres` builds the Postgres image: pg_duckdb base plus the
-`modak` extension compiled in a builder stage, provisioned on first boot by the
-`initdb/` scripts (extensions, then catalog schema, then DuckDB S3 secret).
+`docker/Dockerfile.postgres` builds the Postgres image: pg_duckdb base plus the `modak` extension compiled in a builder stage, provisioned on first boot by the `initdb/` scripts (extensions, then catalog schema, then DuckDB S3 secret).
 
-`docker/Dockerfile.worker` builds the worker image. The default binary is
-`modak-console` (worker + web console), and
-`--build-arg MODAK_BINARY=modak-worker` builds the headless one.
+`docker/Dockerfile.worker` builds the worker image. The default binary is `modak-console` (worker + web console), and `--build-arg MODAK_BINARY=modak-worker` builds the headless one.
 
 ## Iceberg REST catalog variant
 
-By default lake tables are path-based under `s3://warehouse`. An overlay adds a
-bundled REST catalog server and routes new tables through it:
+By default lake tables are path-based under `s3://warehouse`. An overlay adds a bundled REST catalog server and routes new tables through it:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.rest.yml up -d --build

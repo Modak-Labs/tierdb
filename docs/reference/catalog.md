@@ -1,19 +1,12 @@
 # Catalog schema
 
-The `modak.*` tables are the coordination contract between the extension and
-the workers. They are the only channel, there is no RPC. Every atomic handoff
-is a plain Postgres transaction. The schema lives in `sql/catalog.sql` and is
-created and migrated automatically by the worker at startup
-(`modak.schema_meta` stamps the installed version).
+The `modak.*` tables are the coordination contract between the extension and the workers. They are the only channel, there is no RPC. Every atomic handoff is a plain Postgres transaction. The schema lives in `sql/catalog.sql` and is created and migrated automatically by the worker at startup (`modak.schema_meta` stamps the installed version).
 
-All columns stay executor-portable (plain ints, text, jsonb) because
-`pg_duckdb` may push read-path queries down to DuckDB.
+All columns stay executor-portable (plain ints, text, jsonb) because `pg_duckdb` may push read-path queries down to DuckDB.
 
 ## Data model
 
-Each table models one concern. `modak.tables` holds registration config and
-nothing else: everything that changes at runtime lives in its own row keyed by
-`table_id`, and all of it cascades on unregister.
+Each table models one concern. `modak.tables` holds registration config and nothing else: everything that changes at runtime lives in its own row keyed by `table_id`, and all of it cascades on unregister.
 
 ```mermaid
 erDiagram
@@ -31,10 +24,7 @@ erDiagram
 
 ## `modak.storage_profiles`
 
-Named warehouse bindings tables register against (see
-[Storage profiles](../tables/storage-profiles.md)). The seeded `default`
-profile has a blank warehouse and `NULL` format, both meaning "resolve from
-the worker's environment". A partial unique index keeps exactly one default.
+Named warehouse bindings tables register against (see [Storage profiles](../tables/storage-profiles.md)). The seeded `default` profile has a blank warehouse and `NULL` format, both meaning "resolve from the worker's environment". A partial unique index keeps exactly one default.
 
 | Column | Meaning |
 |--------|---------|
@@ -47,10 +37,7 @@ the worker's environment". A partial unique index keeps exactly one default.
 
 ## `modak.tables`
 
-Registered logical tables. One row per registration, written at register time
-and only touched again for policy edits. CHECK constraints keep mode-specific
-columns coherent (mirror plumbing only on mirrored rows, retention and
-keep-heap only on tiered rows).
+Registered logical tables. One row per registration, written at register time and only touched again for policy edits. CHECK constraints keep mode-specific columns coherent (mirror plumbing only on mirrored rows, retention and keep-heap only on tiered rows).
 
 | Column | Meaning |
 |--------|---------|
@@ -72,9 +59,7 @@ keep-heap only on tiered rows).
 
 ## `modak.cutline`
 
-The seam, per table, always advanced together in one transaction. The
-published lake pointer lives here because it must move in the same row-update
-as `S`: a reader that sees the cut-line sees the matching physical pointer.
+The seam, per table, always advanced together in one transaction. The published lake pointer lives here because it must move in the same row-update as `S`: a reader that sees the cut-line sees the matching physical pointer.
 
 | Column | Meaning |
 |--------|---------|
@@ -84,14 +69,11 @@ as `S`: a reader that sees the cut-line sees the matching physical pointer.
 | `retention_line` | `R`: lake rows with `tier_key < R` are expired. `NULL` = nothing expired yet |
 | `lake_props` | The published pointer to `S`, e.g. Iceberg's `metadata_location` and `snapshot_id` |
 
-Connectors reading the seam should treat `retention_line` as the floor of the
-table: rows below it exist in old lake snapshots but not in the current one,
-and writes targeting them are rejected by the extension.
+Connectors reading the seam should treat `retention_line` as the floor of the table: rows below it exist in old lake snapshots but not in the current one, and writes targeting them are rejected by the extension.
 
 ## `modak.partitions`
 
-Partition lifecycle map: `hot → sealing → tiering → tiered → dropped`, with
-tier-key bounds per partition.
+Partition lifecycle map: `hot → sealing → tiering → tiered → dropped`, with tier-key bounds per partition.
 
 ## `modak.delta`
 
@@ -108,39 +90,27 @@ The correction overlay for cold rows, merged on read, folded by compaction.
 
 ## `modak.read_pins`
 
-Active read pins. The oldest pin is the reclaim and compaction horizon. Pins
-are transaction-scoped rows with an `expires_at` bound.
+Active read pins. The oldest pin is the reclaim and compaction horizon. Pins are transaction-scoped rows with an `expires_at` bound.
 
 ## `modak.op_log`
 
-Idempotency + crash-resume journal for every lake-writing operation
-(`op_id`, `op_kind`, `phase`, snapshot, details). Op kinds: `tiering`,
-`compaction`, `maintenance`, `retention`, `ingest`, `load`.
+Idempotency + crash-resume journal for every lake-writing operation (`op_id`, `op_kind`, `phase`, snapshot, details). Op kinds: `tiering`, `compaction`, `maintenance`, `retention`, `ingest`, `load`.
 
 ## `modak.load_labels`
 
-The Stream Load label ledger: a label commits with its batch, replays return
-the recorded result, `staged` labels await lake adoption.
+The Stream Load label ledger: a label commits with its batch, replays return the recorded result, `staged` labels await lake adoption.
 
 ## `modak.maintenance_requests`
 
-Pending out-of-schedule maintenance triggers, at most one per table.
-`modak-worker maintain` and the console upsert a row (`requested_by` records
-who asked), the leader claims it with a `DELETE ... RETURNING` so exactly one
-run fires. The result lands in `modak.op_log` like any scheduled pass.
+Pending out-of-schedule maintenance triggers, at most one per table. `modak-worker maintain` and the console upsert a row (`requested_by` records who asked), the leader claims it with a `DELETE ... RETURNING` so exactly one run fires. The result lands in `modak.op_log` like any scheduled pass.
 
 ## `modak.lake_stats`
 
-Lake health, one row per table, refreshed by the worker. `stats` and
-`warnings` are owned by the format plugin (counter names and health judgments
-differ per format), `policy` is a snapshot of the maintenance settings the
-table ran with at collection time.
+Lake health, one row per table, refreshed by the worker. `stats` and `warnings` are owned by the format plugin (counter names and health judgments differ per format), `policy` is a snapshot of the maintenance settings the table ran with at collection time.
 
 ## `modak.copy_progress`
 
-In-flight mirrored initial copies: the slot's consistent point, the last
-copied PK, and chunks done. The row exists only while the copy runs, and a
-re-run of `register` resumes from it.
+In-flight mirrored initial copies: the slot's consistent point, the last copied PK, and chunks done. The row exists only while the copy runs, and a re-run of `register` resumes from it.
 
 ## `modak.status`
 

@@ -7,6 +7,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.postgres
+      target: runtime
     environment:
       POSTGRES_PASSWORD: modak
       MODAK_S3_ENDPOINT: minio:9000

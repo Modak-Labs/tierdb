@@ -11,6 +11,7 @@ pub mod cold_mirror;
 pub mod delta;
 pub mod dml;
 pub mod dml_rewrite;
+mod embedded;
 pub mod explain;
 pub mod hook;
 pub mod pin;
@@ -23,6 +24,7 @@ extern "C-unwind" fn _PG_init() {
     unsafe {
         hook::init();
         dml::init();
+        embedded::init();
     }
 }
 

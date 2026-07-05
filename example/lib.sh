@@ -7,6 +7,10 @@ if [ "${EXAMPLE_REST:-0}" = "1" ]; then
     export COMPOSE_FILE=docker-compose.yml:docker-compose.rest.yml
 fi
 
+if [ "${EXAMPLE_EMBEDDED:-0}" = "1" ]; then
+    export COMPOSE_FILE=docker-compose.yml:docker-compose.embedded.yml
+fi
+
 PSQL="docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -X -q"
 
 say() { echo "== $* =="; }
