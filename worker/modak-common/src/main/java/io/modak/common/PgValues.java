@@ -103,6 +103,9 @@ public final class PgValues {
     }
 
     public static OffsetDateTime parseTimestamp(String text) {
+        if (text.length() > 10 && text.charAt(10) == 'T') {
+            text = text.substring(0, 10) + ' ' + text.substring(11);
+        }
         TemporalAccessor parsed = PG_TIMESTAMP.parseBest(
                 text, OffsetDateTime::from, LocalDateTime::from);
         return parsed instanceof OffsetDateTime odt

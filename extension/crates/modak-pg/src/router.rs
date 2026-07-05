@@ -20,7 +20,7 @@ fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
     let meta = or_error(write_meta(t));
     let cut = or_error(PgCatalog.current(t));
 
-    let tier_key = or_error(tier_key_of(&row, &meta.tier_key_col));
+    let tier_key = or_error(tier_key_of(&row, &meta));
     let pk_vals = or_error(pk_values(&row, &meta.pk_cols));
     let pk = encode_pk(&pk_vals);
 
@@ -50,7 +50,7 @@ fn modak_upsert(table: pg_sys::Oid, row: pgrx::JsonB) -> String {
             "hot".to_string()
         }
         RouteTarget::Delta => {
-            check_retention(t, tier_key);
+            check_retention(t, &meta, tier_key);
             or_error(
                 Spi::run_with_args(
                     UPSERT_DELTA_SQL,
@@ -82,7 +82,7 @@ fn modak_delete(table: pg_sys::Oid, key: pgrx::JsonB, tier_key: i64) -> String {
             "hot".to_string()
         }
         RouteTarget::Delta => {
-            check_retention(t, tier_key);
+            check_retention(t, &meta, tier_key);
             let pk = encode_pk(&values);
             or_error(
                 Spi::run_with_args(
@@ -101,6 +101,19 @@ fn modak_delete(table: pg_sys::Oid, key: pgrx::JsonB, tier_key: i64) -> String {
     }
 }
 
+extension_sql!(
+    r#"
+CREATE FUNCTION modak_delete(oid, jsonb, timestamptz) RETURNS text
+LANGUAGE sql AS 'SELECT modak_delete($1, $2, (extract(epoch from $3) * 1000000)::bigint)';
+CREATE FUNCTION modak_delete(oid, jsonb, timestamp) RETURNS text
+LANGUAGE sql AS 'SELECT modak_delete($1, $2, (extract(epoch from $3) * 1000000)::bigint)';
+CREATE FUNCTION modak_delete(oid, jsonb, date) RETURNS text
+LANGUAGE sql AS 'SELECT modak_delete($1, $2, ($3 - DATE ''1970-01-01'')::bigint)';
+"#,
+    name = "modak_delete_native_overloads",
+    requires = [modak_delete]
+);
+
 fn heap_delete_by_pk(meta: &WriteMeta, values: &[String], tier_floor: Option<i64>) {
     let conditions = meta
         .pk_cols
@@ -110,14 +123,19 @@ fn heap_delete_by_pk(meta: &WriteMeta, values: &[String], tier_floor: Option<i64
         .collect::<Vec<_>>()
         .join(" AND ");
     let bound = tier_floor
-        .map(|t| format!(" AND {} >= {}", ident(&meta.tier_key_col), t))
+        .map(|t| {
+            format!(
+                " AND {} >= {}",
+                ident(&meta.tier_key_col),
+                meta.tier_key_type.pg_literal(t)
+            )
+        })
         .unwrap_or_default();
     let sql = format!(
         "DELETE FROM {}.{} WHERE {conditions}{bound}",
         ident(&meta.schema),
         ident(&meta.table),
     );
-    let args: Vec<pgrx::datum::DatumWithOid> =
-        values.iter().map(|v| v.clone().into()).collect();
+    let args: Vec<pgrx::datum::DatumWithOid> = values.iter().map(|v| v.clone().into()).collect();
     or_error(Spi::run_with_args(&sql, &args).map_err(catalog_err));
 }

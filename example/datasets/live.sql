@@ -1,9 +1,10 @@
--- Two live time-series tables for the streaming demo (live.sh). Same shape as
--- events.sql but at real-world scale: the tier key is epoch seconds, hourly
--- partitions, and 24 hours of seeded history for the worker to tier away.
+-- Two live time-series tables for the streaming demo (live.sh), at real-world
+-- scale: hourly partitions and 24 hours of seeded history for the worker to
+-- tier away. sensor_readings ages by a native timestamptz column, trades by
+-- epoch seconds, so the console shows both tier-key types side by side.
 CREATE TABLE public.sensor_readings (
     id      bigint NOT NULL,
-    ts      bigint NOT NULL,
+    ts      timestamptz NOT NULL,
     device  text   NOT NULL,
     reading double precision NOT NULL
 ) PARTITION BY RANGE (ts);
@@ -23,7 +24,8 @@ DECLARE
 BEGIN
     WHILE lo < now_s + 2 * 3600 LOOP
         EXECUTE format('CREATE TABLE public.sensor_readings_%s PARTITION OF public.sensor_readings
-                        FOR VALUES FROM (%s) TO (%s)', lo, lo, lo + 3600);
+                        FOR VALUES FROM (%L) TO (%L)',
+                       lo, to_timestamp(lo), to_timestamp(lo + 3600));
         EXECUTE format('CREATE TABLE public.trades_%s PARTITION OF public.trades
                         FOR VALUES FROM (%s) TO (%s)', lo, lo, lo + 3600);
         lo := lo + 3600;
@@ -31,7 +33,7 @@ BEGIN
 END $$;
 
 INSERT INTO public.sensor_readings
-SELECT t * 10, t, 'device-' || (t % 7), 20 + 10 * sin(t / 3600.0) + random()
+SELECT t * 10, to_timestamp(t), 'device-' || (t % 7), 20 + 10 * sin(t / 3600.0) + random()
 FROM generate_series(
     (extract(epoch FROM now())::bigint - 24 * 3600) / 3600 * 3600,
     extract(epoch FROM now())::bigint - 1, 2) t;

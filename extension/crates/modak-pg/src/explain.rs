@@ -55,9 +55,7 @@ enum Disposition {
     Unregistered,
     HeapComplete,
     KeepHeap,
-    Seam {
-        mode: String,
-    },
+    Seam { mode: String },
 }
 
 fn disposition(relid: pg_sys::Oid) -> Disposition {
@@ -89,6 +87,10 @@ fn disposition(relid: pg_sys::Oid) -> Disposition {
 
 fn qualified(meta: &WriteMeta) -> String {
     format!("{}.{}", meta.schema, meta.table)
+}
+
+fn lit(meta: &WriteMeta, canonical: i64) -> String {
+    meta.tier_key_type.pg_literal(canonical)
 }
 
 fn meta_of(relid: pg_sys::Oid) -> WriteMeta {
@@ -178,7 +180,8 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
                 lines.push(format!("{} ({mode}): two-tier read", qualified(&meta)));
                 lines.push(format!(
                     "  hot: heap partitions at {} >= {}",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ));
                 lines.push(format!(
                     "  cold: iceberg pinned at snapshot {}, {} delta row(s) merged, newest wins",
@@ -187,7 +190,8 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
                 ));
                 lines.push(format!(
                     "  pin: (T={}, S={}) held for the transaction",
-                    cut.t.0, cut.snapshot.0
+                    lit(&meta, cut.t.0),
+                    cut.snapshot.0
                 ));
             }
         }
@@ -259,7 +263,8 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
                 format!(
                     "  rows with {} < {}: the partition trigger mirrors the change \
                      into modak.delta for seam reads and the lake fold",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ),
             ]
         }
@@ -274,12 +279,13 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
             let mut lines = vec![format!(
                 "{verb} on {} ({mode}): cut-line T={}",
                 qualified(&meta),
-                cut.t.0
+                lit(&meta, cut.t.0)
             )];
             if verdict == Classification::Hot {
                 lines.push(format!(
                     "  verdict: provably hot ({} >= {}), statement passes through untouched",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ));
                 return lines;
             }
@@ -296,7 +302,8 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
 
             lines.push(format!(
                 "  hot half: the original {verb} bounded to {} >= {} on the heap",
-                meta.tier_key_col, cut.t.0
+                meta.tier_key_col,
+                lit(&meta, cut.t.0)
             ));
             lines.push(
                 "  cold half: matching lake rows become modak.delta entries, visible \
@@ -319,8 +326,9 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
             }
             if let Some(r) = retention_of(relid) {
                 lines.push(format!(
-                    "  retention: rows with {} < {r} are expired and rejected",
-                    meta.tier_key_col
+                    "  retention: rows with {} < {} are expired and rejected",
+                    meta.tier_key_col,
+                    lit(&meta, r)
                 ));
             }
             lines
@@ -393,7 +401,8 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                 format!(
                     "  rows with {} < {}: the partition trigger mirrors them into \
                      modak.delta for seam reads and the lake fold",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ),
             ]
         }
@@ -405,7 +414,7 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                 "INSERT into {} ({mode}): routed per row by {} against the cut-line T={}",
                 qualified(&meta),
                 meta.tier_key_col,
-                cut.t.0
+                lit(&meta, cut.t.0)
             )];
             match literal_tier_keys(query, relid, &meta.tier_key_col) {
                 Some(keys) => {
@@ -415,37 +424,43 @@ unsafe fn explain_insert(query: *mut pg_sys::Query) -> Vec<String> {
                         .unwrap_or(0);
                     let cold = keys.len() - hot - expired;
                     if hot > 0 {
-                        lines.push(format!("  {hot} row(s) >= {}: heap partitions", cut.t.0));
+                        lines.push(format!(
+                            "  {hot} row(s) >= {}: heap partitions",
+                            lit(&meta, cut.t.0)
+                        ));
                     }
                     if cold > 0 {
                         lines.push(format!(
                             "  {cold} row(s) < {}: modak.delta via the spill partition, \
                              visible immediately, folded by the worker",
-                            cut.t.0
+                            lit(&meta, cut.t.0)
                         ));
                     }
                     if expired > 0 {
                         lines.push(format!(
                             "  {expired} row(s) below the retention line {}: rejected, \
                              the statement fails",
-                            retention.unwrap_or_default()
+                            lit(&meta, retention.unwrap_or_default())
                         ));
                     }
                 }
                 None => {
                     lines.push(format!(
                         "  rows with {} >= {}: heap partitions",
-                        meta.tier_key_col, cut.t.0
+                        meta.tier_key_col,
+                        lit(&meta, cut.t.0)
                     ));
                     lines.push(format!(
                         "  rows with {} < {}: modak.delta via the spill partition, \
                          visible immediately, folded by the worker",
-                        meta.tier_key_col, cut.t.0
+                        meta.tier_key_col,
+                        lit(&meta, cut.t.0)
                     ));
                     if let Some(r) = retention {
                         lines.push(format!(
-                            "  rows with {} < {r}: rejected, expired from the lake",
-                            meta.tier_key_col
+                            "  rows with {} < {}: rejected, expired from the lake",
+                            meta.tier_key_col,
+                            lit(&meta, r)
                         ));
                     }
                 }
@@ -555,7 +570,8 @@ unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
                 format!(
                     "  rows with {} < {}: the partition trigger mirrors them into \
                      modak.delta",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ),
             ]
         }
@@ -569,17 +585,20 @@ unsafe fn explain_copy(stmt: *mut pg_sys::CopyStmt) -> Vec<String> {
                 ),
                 format!(
                     "  rows with {} >= {}: heap partitions",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ),
                 format!(
                     "  rows with {} < {}: modak.delta via the spill partition",
-                    meta.tier_key_col, cut.t.0
+                    meta.tier_key_col,
+                    lit(&meta, cut.t.0)
                 ),
             ];
             if let Some(r) = retention_of(relid) {
                 lines.push(format!(
-                    "  rows with {} < {r}: rejected, expired from the lake",
-                    meta.tier_key_col
+                    "  rows with {} < {}: rejected, expired from the lake",
+                    meta.tier_key_col,
+                    lit(&meta, r)
                 ));
             }
             lines

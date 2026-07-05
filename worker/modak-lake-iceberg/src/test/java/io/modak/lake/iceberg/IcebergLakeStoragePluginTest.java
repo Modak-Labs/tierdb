@@ -48,7 +48,7 @@ class IcebergLakeStoragePluginTest {
         String ref = storage.tableRef("public", "events");
         String metadataLocation = storage.createTableIfAbsent(ref,
                 List.of(new Column("id", ColumnType.LONG), new Column("t", ColumnType.LONG)),
-                Set.of("id", "t"), "t", 0);
+                Set.of("id", "t"), "t", io.modak.lake.LakePartition.none());
 
         assertNotNull(metadataLocation);
         var table = storage.tables().load(ref);

@@ -43,13 +43,13 @@ final class IcebergIngest {
 
     private final Table table;
     private final ColdTableSpec spec;
-    private final TruncatePartitioning partitioning;
+    private final TierKeyPartitioning partitioning;
     private final IcebergSnapshotCommit commit;
 
     IcebergIngest(Table table, ColdTableSpec spec) {
         this.table = table;
         this.spec = spec;
-        this.partitioning = TruncatePartitioning.of(table);
+        this.partitioning = TierKeyPartitioning.of(table);
         this.commit = new IcebergSnapshotCommit(table);
     }
 
@@ -96,9 +96,12 @@ final class IcebergIngest {
     private boolean overlapsExistingData(List<Staged> staged) {
         long lo = staged.stream().mapToLong(Staged::lo).min().orElseThrow();
         long hi = staged.stream().mapToLong(Staged::hi).max().orElseThrow();
+        Types.NestedField field = requireField(spec.tierKeyCol());
         return IcebergScans.anyFileMatches(table, Expressions.and(
-                Expressions.greaterThanOrEqual(spec.tierKeyCol(), lo),
-                Expressions.lessThanOrEqual(spec.tierKeyCol(), hi)));
+                Expressions.greaterThanOrEqual(spec.tierKeyCol(),
+                        TierKeys.internalValue(field.type(), lo)),
+                Expressions.lessThanOrEqual(spec.tierKeyCol(),
+                        TierKeys.internalValue(field.type(), hi))));
     }
 
     private AppendFiles append(List<Staged> staged) {
@@ -173,7 +176,7 @@ final class IcebergIngest {
                 for (String pkCol : spec.pkCols()) {
                     key.setField(pkCol, r.getField(pkCol));
                 }
-                long tierKey = ((Number) r.getField(spec.tierKeyCol())).longValue();
+                long tierKey = TierKeys.canonical(r.getField(spec.tierKeyCol()));
                 writers.writerFor(tierKey).write(key);
             }
         }

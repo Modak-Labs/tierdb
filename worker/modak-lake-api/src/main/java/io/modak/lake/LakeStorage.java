@@ -16,7 +16,7 @@ public interface LakeStorage {
     String tableRef(String schema, String table);
 
     String createTableIfAbsent(String ref, List<Column> columns, Set<String> requiredCols,
-            String tierKeyCol, long partitionWidth);
+            String tierKeyCol, LakePartition partition);
 
     void dropTable(String ref);
 

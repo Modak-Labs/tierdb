@@ -83,7 +83,7 @@ public final class WorkerDaemon {
     }
 
     public void start() {
-        Log.info("starting: pg=%s warehouse=%s interval=%ds lag=%d",
+        Log.info("starting: pg=%s warehouse=%s interval=%ds lag=%s",
                 config.pgUrl(), config.warehouse(), config.cycleIntervalSeconds(),
                 config.tieringLag());
         CatalogSchema.apply(dataSource);
@@ -231,8 +231,10 @@ public final class WorkerDaemon {
 
             try {
                 new TieringWorker(catalog, lake, new JdbcHotSource(dataSource),
-                        new LagBasedTieringPolicy(dataSource, catalog, config.tieringLag()),
-                        CeilingLagEvictionPolicy.forJdbc(dataSource, table, config.reclaimLag()))
+                        new LagBasedTieringPolicy(dataSource, catalog,
+                                table.tierKeyType().parseLagOrWidth(config.tieringLag())),
+                        CeilingLagEvictionPolicy.forJdbc(dataSource, table,
+                                table.tierKeyType().parseLagOrWidth(config.reclaimLag())))
                         .runCycle(table.id(), Instant.now());
             } catch (ReclaimException e) {
                 Log.error("%s: reclaim failed (data is safe; DROP retries next cycle): %s",

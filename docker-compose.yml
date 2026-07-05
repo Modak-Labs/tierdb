@@ -52,7 +52,10 @@ services:
       mc mb --ignore-existing local/warehouse &&
       mc mb --ignore-existing local/analytics &&
       (mc admin user add local analytics analytics-secret || true) &&
-      mc admin policy attach local readwrite --user analytics || true
+      printf '%s' '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::analytics\",\"arn:aws:s3:::analytics/*\"]}]}' > /tmp/analytics.json &&
+      (mc admin policy create local analytics-rw /tmp/analytics.json || true) &&
+      (mc admin policy attach local analytics-rw --user analytics ||
+       mc admin policy attach local readwrite --user analytics || true)
       "
 
   worker:

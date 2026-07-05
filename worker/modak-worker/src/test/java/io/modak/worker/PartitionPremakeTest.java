@@ -108,7 +108,7 @@ class PartitionPremakeTest {
         return new RegisteredTable(new TableId(oid), "public", table, List.of("id"), "ts",
                 "{\"unit\":\"range\",\"partition_width\":100}", "iceberg", "/wh/" + table,
                 "default", TableMode.TIERED, null, null, Optional.empty(), Optional.empty(),
-                false, MaintenancePolicy.NONE);
+                false, MaintenancePolicy.NONE, io.modak.common.TierKeyType.BIGINT);
     }
 
     private static void exec(String sql) {

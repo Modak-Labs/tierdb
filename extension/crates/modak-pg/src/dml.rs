@@ -233,28 +233,29 @@ fn modak_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
     let t = TableId(table.into());
     let meta = or_error(write_meta(t));
     let cut = or_error(PgCatalog.current(t));
-    let tier_key = or_error(tier_key_of(&row, &meta.tier_key_col));
+    let tier_key = or_error(tier_key_of(&row, &meta));
 
+    let key_lit = meta.tier_key_type.pg_literal(tier_key);
+    let cut_lit = meta.tier_key_type.pg_literal(cut.t.0);
     if tier_key >= cut.t.0 {
         error!(
-            "modak: no heap partition of {}.{} covers tier_key {tier_key} \
-             (cut-line is {}); the premake worker is behind or the range was \
-             never created",
-            meta.schema, meta.table, cut.t.0
+            "modak: no heap partition of {}.{} covers tier_key {key_lit} \
+             (cut-line is {cut_lit}); the premake worker is behind or the range \
+             was never created",
+            meta.schema, meta.table
         );
     }
     if meta.keep_heap {
         error!(
-            "modak: no heap partition of {}.{} covers tier_key {tier_key} and \
+            "modak: no heap partition of {}.{} covers tier_key {key_lit} and \
              the table keeps its heap, create the partition first",
             meta.schema, meta.table
         );
     }
     if !TRANSPARENT_WRITES.get() {
         error!(
-            "modak: tier_key {tier_key} is below the cut-line {} and \
-             modak.transparent_writes is off; SET it on, or use modak_upsert()",
-            cut.t.0
+            "modak: tier_key {key_lit} is below the cut-line {cut_lit} and \
+             modak.transparent_writes is off; SET it on, or use modak_upsert()"
         );
     }
     WRITE_FRAMES.with_borrow(|frames| {
@@ -274,7 +275,7 @@ fn modak_spill_route(table: pg_sys::Oid, row: pgrx::JsonB) {
             }
         }
     });
-    check_retention(t, tier_key);
+    check_retention(t, &meta, tier_key);
 
     let pk = encode_pk(&or_error(pk_values(&row, &meta.pk_cols)));
     or_error(

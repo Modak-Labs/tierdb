@@ -59,8 +59,8 @@ SELECT * FROM public.events ORDER BY id;       -- raw heap: only the hot slice
 
 ## Register your own table
 
-Tiered mode needs `PARTITION BY RANGE` on a bigint tier key. Mirrored mode
-takes any table with a primary key:
+Tiered mode needs `PARTITION BY RANGE` on the tier key, a timestamp, date,
+or integer column. Mirrored mode takes any table with a primary key:
 
 ```bash
 docker compose run --rm worker register \

@@ -7,6 +7,7 @@ import io.modak.common.PartitionBounds;
 import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
 import io.modak.common.TierKey;
+import io.modak.common.TierKeyType;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -26,7 +27,7 @@ import javax.sql.DataSource;
 public final class PartitionSync {
 
     static final Pattern RANGE_BOUND =
-            Pattern.compile("FOR VALUES FROM \\('?(-?\\d+)'?\\) TO \\('?(-?\\d+)'?\\)");
+            Pattern.compile("FOR VALUES FROM \\('?([^')]+)'?\\) TO \\('?([^')]+)'?\\)");
 
     private static final String CHILDREN_SQL = """
             SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) AS bound
@@ -44,16 +45,18 @@ public final class PartitionSync {
         this.catalog = Objects.requireNonNull(catalog);
     }
 
-    public static java.util.OptionalLong firstRangeWidth(DataSource ds, String qualified) {
+    public static java.util.OptionalLong firstRangeWidth(DataSource ds, String qualified,
+            TierKeyType codec) {
         try (Connection c = ds.getConnection();
                 PreparedStatement ps = c.prepareStatement(CHILDREN_SQL)) {
             ps.setString(1, qualified);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    Matcher m = RANGE_BOUND.matcher(rs.getString(2));
-                    if (m.find()) {
-                        return java.util.OptionalLong.of(
-                                Long.parseLong(m.group(2)) - Long.parseLong(m.group(1)));
+                    java.util.OptionalLong width = boundsOf(rs.getString(2), codec)
+                            .map(b -> java.util.OptionalLong.of(b[1] - b[0]))
+                            .orElse(java.util.OptionalLong.empty());
+                    if (width.isPresent()) {
+                        return width;
                     }
                 }
             }
@@ -63,6 +66,20 @@ public final class PartitionSync {
         return java.util.OptionalLong.empty();
     }
 
+    static java.util.Optional<long[]> boundsOf(String bound, TierKeyType codec) {
+        Matcher m = RANGE_BOUND.matcher(bound);
+        if (!m.find()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(new long[] {
+                    codec.parseBoundLiteral(m.group(1)),
+                    codec.parseBoundLiteral(m.group(2))});
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     public int sync(RegisteredTable table) {
         Set<String> known = new HashSet<>();
         for (PartitionInfo p : catalog.listPartitions(table.id())) {
@@ -70,6 +87,7 @@ public final class PartitionSync {
         }
 
         String qualified = table.schemaName() + "." + table.tableName();
+        TierKeyType codec = table.tierKeyType();
         int added = 0;
         try (Connection c = dataSource.getConnection();
                 PreparedStatement ps = c.prepareStatement(CHILDREN_SQL)) {
@@ -80,15 +98,15 @@ public final class PartitionSync {
                     if (known.contains(name)) {
                         continue;
                     }
-                    Matcher m = RANGE_BOUND.matcher(rs.getString(2));
-                    if (!m.find()) {
+                    java.util.Optional<long[]> bounds = boundsOf(rs.getString(2), codec);
+                    if (bounds.isEmpty()) {
                         continue;
                     }
                     catalog.upsertPartition(
                             new PartitionId(table.id(), name),
                             new PartitionBounds(
-                                    new TierKey(Long.parseLong(m.group(1))),
-                                    new TierKey(Long.parseLong(m.group(2)))),
+                                    new TierKey(bounds.get()[0]),
+                                    new TierKey(bounds.get()[1])),
                             PartitionState.HOT);
                     added++;
                 }

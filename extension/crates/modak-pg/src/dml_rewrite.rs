@@ -33,11 +33,12 @@ fn modak_lake_rows(
 
     let base = modak_core::sqlgen::lake_base_select(&meta);
     let tier = ident(&meta.tier_key_col);
+    let bound = meta.tier_key_type.pg_literal(tier_key_lt);
     let rows = Spi::connect_mut(|client| {
         client.update(
             &format!(
                 "CREATE TEMP TABLE __modak_lake_spool AS \
-                 SELECT * FROM (\n{base}\n) b WHERE b.{tier} < {tier_key_lt}"
+                 SELECT * FROM (\n{base}\n) b WHERE b.{tier} < {bound}"
             ),
             None,
             &[],
@@ -57,7 +58,7 @@ fn modak_lake_rows(
         Ok::<_, pgrx::spi::SpiError>(out)
     });
     match rows {
-        Ok(rows) => SetOfIterator::new(rows.into_iter()),
+        Ok(rows) => SetOfIterator::new(rows),
         Err(e) => error!("modak: lake spool failed: {e}"),
     }
 }
@@ -146,7 +147,7 @@ unsafe fn rewrite(
                 write_meta.schema,
                 write_meta.table,
                 write_meta.tier_key_col,
-                cut.t.0,
+                write_meta.tier_key_type.pg_literal(cut.t.0),
             );
         }
         return None;
@@ -194,7 +195,7 @@ unsafe fn rewrite(
             meta.hot_schema,
             meta.hot_table,
             meta.tier_key_col,
-            cut.t.0,
+            meta.tier_key_type.pg_literal(cut.t.0),
         );
     }
 
@@ -442,12 +443,18 @@ unsafe fn strip_relabel(node: *mut pg_sys::Node) -> *mut pg_sys::Node {
             }
             pg_sys::NodeTag::T_FuncExpr => {
                 let f = node as *mut pg_sys::FuncExpr;
-                let int_result = (*f).funcresulttype == pg_sys::INT8OID
-                    || (*f).funcresulttype == pg_sys::INT4OID
-                    || (*f).funcresulttype == pg_sys::INT2OID;
+                let cast_result = matches!(
+                    (*f).funcresulttype,
+                    t if t == pg_sys::INT8OID
+                        || t == pg_sys::INT4OID
+                        || t == pg_sys::INT2OID
+                        || t == pg_sys::TIMESTAMPTZOID
+                        || t == pg_sys::TIMESTAMPOID
+                        || t == pg_sys::DATEOID
+                );
                 if u32::from((*f).funcid) < pg_sys::FirstNormalObjectId
                     && (*f).funcformat == pg_sys::CoercionForm::COERCE_IMPLICIT_CAST
-                    && int_result
+                    && cast_result
                     && pg_sys::list_length((*f).args) == 1
                 {
                     node = pg_sys::list_nth((*f).args, 0) as *mut pg_sys::Node;
@@ -460,6 +467,24 @@ unsafe fn strip_relabel(node: *mut pg_sys::Node) -> *mut pg_sys::Node {
     }
 }
 
+// Postgres stores timestamps as micros and dates as days since 2000-01-01,
+// the canonical axis runs from the Unix epoch.
+const PG_EPOCH_MICROS: i64 = 946_684_800_000_000;
+const PG_EPOCH_DAYS: i64 = 10_957;
+
+unsafe fn datum_to_canonical(elem: pg_sys::Oid, datum: pg_sys::Datum) -> Option<i64> {
+    match elem {
+        t if t == pg_sys::INT8OID => Some(datum.value() as i64),
+        t if t == pg_sys::INT4OID => Some(datum.value() as u32 as i32 as i64),
+        t if t == pg_sys::INT2OID => Some(datum.value() as u16 as i16 as i64),
+        t if t == pg_sys::TIMESTAMPTZOID || t == pg_sys::TIMESTAMPOID => {
+            (datum.value() as i64).checked_add(PG_EPOCH_MICROS)
+        }
+        t if t == pg_sys::DATEOID => Some(i64::from(datum.value() as u32 as i32) + PG_EPOCH_DAYS),
+        _ => None,
+    }
+}
+
 pub(crate) unsafe fn const_i64(node: *mut pg_sys::Node) -> Option<i64> {
     let node = strip_relabel(node);
     if (*node).type_ != pg_sys::NodeTag::T_Const {
@@ -469,13 +494,7 @@ pub(crate) unsafe fn const_i64(node: *mut pg_sys::Node) -> Option<i64> {
     if (*c).constisnull {
         return None;
     }
-    let datum = (*c).constvalue;
-    match (*c).consttype {
-        t if t == pg_sys::INT8OID => Some(datum.value() as i64),
-        t if t == pg_sys::INT4OID => Some(datum.value() as u32 as i32 as i64),
-        t if t == pg_sys::INT2OID => Some(datum.value() as u16 as i16 as i64),
-        _ => None,
-    }
+    datum_to_canonical((*c).consttype, (*c).constvalue)
 }
 
 unsafe fn const_i64_array(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
@@ -490,16 +509,19 @@ unsafe fn const_i64_array(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
     let elem = match (*c).consttype {
         t if t == pg_sys::INT8ARRAYOID => pg_sys::INT8OID,
         t if t == pg_sys::INT4ARRAYOID => pg_sys::INT4OID,
+        t if t == pg_sys::TIMESTAMPTZARRAYOID => pg_sys::TIMESTAMPTZOID,
+        t if t == pg_sys::TIMESTAMPARRAYOID => pg_sys::TIMESTAMPOID,
+        t if t == pg_sys::DATEARRAYOID => pg_sys::DATEOID,
         _ => return None,
     };
     let arr = pg_sys::pg_detoast_datum((*c).constvalue.cast_mut_ptr()) as *mut pg_sys::ArrayType;
     let mut elems: *mut pg_sys::Datum = std::ptr::null_mut();
     let mut nulls: *mut bool = std::ptr::null_mut();
     let mut n: c_int = 0;
-    let (elmlen, elmbyval, elmalign) = if elem == pg_sys::INT8OID {
-        (8, true, b'd' as c_char)
-    } else {
+    let (elmlen, elmbyval, elmalign) = if elem == pg_sys::INT4OID || elem == pg_sys::DATEOID {
         (4, true, b'i' as c_char)
+    } else {
+        (8, true, b'd' as c_char)
     };
     pg_sys::deconstruct_array(
         arr, elem, elmlen, elmbyval, elmalign, &mut elems, &mut nulls, &mut n,
@@ -509,12 +531,7 @@ unsafe fn const_i64_array(node: *mut pg_sys::Node) -> Option<Vec<i64>> {
         if *nulls.add(i) {
             return None;
         }
-        let d = *elems.add(i);
-        out.push(if elem == pg_sys::INT8OID {
-            d.value() as i64
-        } else {
-            d.value() as u32 as i32 as i64
-        });
+        out.push(datum_to_canonical(elem, *elems.add(i))?);
     }
     Some(out)
 }

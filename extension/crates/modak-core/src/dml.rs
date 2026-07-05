@@ -129,6 +129,7 @@ struct Halves {
 fn halves(meta: &TableMeta, t: TierKey, frag: &DmlFragments) -> Result<Halves> {
     let cold_branch = render_cold_branch_spooled(t, meta)?;
     let tier = ident(&meta.tier_key_col);
+    let t_lit = meta.tier_key_type.pg_literal(t.0);
     // The always-true gate references the CTE so the delta write runs during
     // ExecutorRun, where the command tag still sees the tallied cold rows. An
     // unreferenced modifying CTE only runs at ExecutorFinish, too late.
@@ -136,9 +137,9 @@ fn halves(meta: &TableMeta, t: TierKey, frag: &DmlFragments) -> Result<Halves> {
     let (cold_where, hot_where) = match &frag.where_sql {
         Some(w) => (
             format!("({w})"),
-            format!("({w}) AND m.{tier} >= {} AND {gate}", t.0),
+            format!("({w}) AND m.{tier} >= {t_lit} AND {gate}"),
         ),
-        None => ("true".into(), format!("m.{tier} >= {} AND {gate}", t.0)),
+        None => ("true".into(), format!("m.{tier} >= {t_lit} AND {gate}")),
     };
     Ok(Halves {
         cold_from: format!("({cold_branch}) m", cold_branch = cold_branch),
@@ -224,28 +225,24 @@ pub fn render_update(
     // Tier moves decompose per row. A row still cold becomes a delta upsert
     // at the new tier remembering the old one. A row now hot becomes a delta
     // tombstone at the lake's partition plus a heap insert (__modak_move).
+    let t_lit = meta.tier_key_type.pg_literal(t.0);
+    let new_c = meta.tier_key_type.canonical_expr(&format!("m.{tier}"));
+    let old_c = meta.tier_key_type.canonical_expr("m.__modak_old_tier");
     let (op, delta_tier, old_tier, payload) = if moves_tier {
         (
-            format!("CASE WHEN m.{tier} >= {} THEN 1 ELSE 0 END", t.0),
+            format!("CASE WHEN m.{tier} >= {t_lit} THEN 1 ELSE 0 END"),
+            format!("CASE WHEN m.{tier} >= {t_lit} THEN {old_c} ELSE {new_c} END"),
+            format!("CASE WHEN m.{tier} < {t_lit} THEN NULLIF({old_c}, {new_c}) END"),
             format!(
-                "CASE WHEN m.{tier} >= {} THEN m.__modak_old_tier ELSE m.{tier} END",
-                t.0
-            ),
-            format!(
-                "CASE WHEN m.{tier} < {} THEN NULLIF(m.__modak_old_tier, m.{tier}) END",
-                t.0
-            ),
-            format!(
-                "CASE WHEN m.{tier} >= {} THEN jsonb_build_object({}) \
+                "CASE WHEN m.{tier} >= {t_lit} THEN jsonb_build_object({}) \
                  ELSE to_jsonb(m) - '__modak_old_tier' END",
-                t.0,
                 pk_pairs(meta),
             ),
         )
     } else {
         (
             "0".into(),
-            format!("m.{tier}"),
+            new_c.clone(),
             "NULL::bigint".into(),
             "to_jsonb(m)".into(),
         )
@@ -261,11 +258,10 @@ pub fn render_update(
         format!(
             ",\n__modak_move AS (\n\
                INSERT INTO {} ({cols})\n\
-               SELECT {cols} FROM __modak_new m WHERE m.{tier} >= {}\n\
+               SELECT {cols} FROM __modak_new m WHERE m.{tier} >= {t_lit}\n\
                RETURNING 1\n\
              )",
             hot_rel(meta),
-            t.0,
         )
     } else {
         String::new()
@@ -318,7 +314,13 @@ pub fn render_delete(
          DELETE FROM {hot_rel} m WHERE {hot_where}{ret}",
         table_id = meta.table_id.0,
         pk = pk_sql_expr("m", &meta.pk_cols),
-        guarded = guarded_tier(&format!("m.{}", ident(&meta.tier_key_col)), retention, frag),
+        guarded = guarded_tier(
+            &meta
+                .tier_key_type
+                .canonical_expr(&format!("m.{}", ident(&meta.tier_key_col))),
+            retention,
+            frag
+        ),
         pk_pairs = pk_pairs(meta),
         cold_from = h.cold_from,
         cold_where = h.cold_where,
@@ -437,6 +439,7 @@ mod tests {
             ],
             pk_cols: vec!["id".into()],
             tier_key_col: "event_time".into(),
+            tier_key_type: crate::TierKeyType::Bigint,
             lake_metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
         }
     }

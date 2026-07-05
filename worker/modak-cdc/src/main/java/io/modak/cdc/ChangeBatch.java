@@ -12,6 +12,7 @@ import io.modak.common.PgValues;
 import io.modak.common.PkCodec;
 import io.modak.common.RowBatchData;
 import io.modak.common.TableId;
+import io.modak.common.TierKeyType;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ public final class ChangeBatch {
     private final TableId table;
     private final List<String> pkColumns;
     private final String tierKeyColumn;
+    private final TierKeyType tierKeyType;
 
     private List<RowBatchData.Column> columns;
     private int[] pkIndexes;
@@ -36,9 +38,15 @@ public final class ChangeBatch {
     private long versionSeq;
 
     public ChangeBatch(TableId table, List<String> pkColumns, String tierKeyColumn) {
+        this(table, pkColumns, tierKeyColumn, TierKeyType.BIGINT);
+    }
+
+    public ChangeBatch(TableId table, List<String> pkColumns, String tierKeyColumn,
+            TierKeyType tierKeyType) {
         this.table = table;
         this.pkColumns = List.copyOf(pkColumns);
         this.tierKeyColumn = tierKeyColumn;
+        this.tierKeyType = tierKeyType;
     }
 
     public List<RowBatchData.Column> classify(Relation relation) {
@@ -199,11 +207,14 @@ public final class ChangeBatch {
 
     private long tierKeyOf(Object[] row) {
         Object v = row[tierKeyIndex];
-        if (v instanceof Long l) {
-            return l;
+        if (v == null) {
+            throw new CdcException("tier-key column '" + tierKeyColumn + "' is NULL");
         }
-        throw new CdcException("tier-key column '" + tierKeyColumn + "' must decode to a long, got "
-                + (v == null ? "NULL" : v.getClass().getSimpleName()));
+        try {
+            return tierKeyType.encode(v);
+        } catch (IllegalArgumentException e) {
+            throw new CdcException("tier-key column '" + tierKeyColumn + "': " + e.getMessage());
+        }
     }
 
     private long nextVersion() {

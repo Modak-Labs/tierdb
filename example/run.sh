@@ -11,6 +11,7 @@ cd "$(dirname "$0")"
 ./steps/03-mirroring.sh
 ./steps/04-lifecycle.sh
 ./steps/05-stream-load.sh
+./steps/06-timestamptz.sh
 
 echo ""
 echo "EXAMPLE PASS:"
@@ -22,3 +23,5 @@ echo "  lifecycle: a copy killed mid-flight resumed from the journal, verify mat
 echo "             heap and lake exactly, and unregister left nothing behind."
 echo "  stream:    labeled HTTP micro-batches routed per row across both tiers, and a"
 echo "             replayed label returned its recorded result without applying anything."
+echo "  timestamptz: a timestamp-keyed table tiered by day, read and corrected with"
+echo "             native timestamptz SQL, no epoch columns anywhere."

@@ -68,11 +68,13 @@ SELECT modak_upsert('public.events'::regclass,
 Routes one delete. `key` is the primary key, a bare value for a single-column
 key or an object for composite keys. Cold deletes become delta tombstones.
 The key fields are kept as the payload because the compaction fold needs
-their typed values.
+their typed values. Overloads accept the tier key in its native type
+(`timestamptz`, `timestamp`, `date`) for tables with temporal tier keys.
 
 ```sql
 SELECT modak_delete('public.events'::regclass, '1', 10);
 SELECT modak_delete('public.fleet'::regclass, '{"tenant_id":2,"vehicle_id":7}', 90);
+SELECT modak_delete('public.readings'::regclass, '5', TIMESTAMPTZ '2026-01-03 08:00:00+00');
 ```
 
 ### `modak_read_begin(table regclass) → (pin_id bigint, ...)`

@@ -167,7 +167,11 @@ main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 24px; }
   color: var(--text-dim);
   margin-bottom: 6px;
 }
-.card .value { font-family: var(--mono); font-size: 22px; font-weight: 500; }
+.card .value { font-family: var(--mono); font-size: 22px; font-weight: 500; line-height: 1.35; }
+.card .value:first-of-type { min-height: 30px; }
+.card .value + .value { margin-top: 6px; }
+.card .value .tk-val { font-size: 15px; }
+.card .value .tk-name { font-size: 13px; color: var(--text-dim); font-weight: 400; white-space: nowrap; }
 .card .value small {
   font-size: 12px;
   color: var(--text-dim);
@@ -192,6 +196,9 @@ main { flex: 1; width: 100%; max-width: 1280px; margin: 0 auto; padding: 24px; }
   margin-bottom: 12px;
 }
 .panel h2 .unit { text-transform: none; letter-spacing: 0; font-weight: 400; opacity: 0.7; }
+
+.scroll-table { max-height: 340px; overflow-y: auto; }
+.scroll-table thead th { position: sticky; top: 0; background: var(--bg-raised); z-index: 1; }
 
 table.fleet { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
 table.fleet th {
@@ -242,6 +249,13 @@ td.dim { color: var(--text-dim); }
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.tk-type {
+  font-family: var(--mono);
+  color: var(--text-dim);
+  margin-right: 5px;
+  cursor: default;
+}
+
 .badge.tiered { background: var(--green-soft); color: var(--green); }
 .badge.mirrored { background: var(--purple-soft); color: var(--purple); }
 .badge.copying { background: var(--blue-soft); color: var(--blue); }
@@ -286,6 +300,7 @@ td.dim { color: var(--text-dim); }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   gap: 22px;
+  margin-bottom: 22px;
 }
 .chart-panel { margin-bottom: 0; }
 .chart { height: 240px; }
@@ -313,6 +328,15 @@ td.dim { color: var(--text-dim); }
   color: var(--text);
 }
 .schema-table > .name:hover { background: var(--bg-hover); }
+.schema-table .part-count {
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
 .schema-table .cols { display: none; padding: 2px 0 4px 16px; }
 .schema-table.open .cols { display: block; }
 .schema-table .col {

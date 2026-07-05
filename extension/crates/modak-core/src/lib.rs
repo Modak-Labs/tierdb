@@ -7,8 +7,10 @@ pub mod domain;
 pub mod planner;
 pub mod ports;
 pub mod sqlgen;
+pub mod tier_key;
 
 pub use domain::*;
+pub use tier_key::TierKeyType;
 
 /// Crate-wide error type. Adapters map their backend errors into this.
 #[derive(Debug, thiserror::Error)]

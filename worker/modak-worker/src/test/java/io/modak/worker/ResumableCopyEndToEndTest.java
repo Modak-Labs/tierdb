@@ -157,9 +157,10 @@ class ResumableCopyEndToEndTest {
 
         @Override
         public String createTableIfAbsent(String ref, List<Column> columns,
-                Set<String> requiredCols, String tierKeyCol, long partitionWidth) {
+                Set<String> requiredCols, String tierKeyCol,
+                io.modak.lake.LakePartition partition) {
             return delegate.createTableIfAbsent(ref, columns, requiredCols, tierKeyCol,
-                    partitionWidth);
+                    partition);
         }
 
         @Override

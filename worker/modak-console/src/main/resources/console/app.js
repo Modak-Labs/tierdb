@@ -77,6 +77,35 @@ function fmtNum(v) {
   return Number(v).toLocaleString("en-US");
 }
 
+function tkSymbol(type) {
+  const t = type || "bigint";
+  const glyph = t === "timestamptz" || t === "timestamp" ? "◷"
+    : t === "date" ? "▦" : "#";
+  return `<span class="tk-type" title="tier key: ${esc(t)}">${glyph}</span>`;
+}
+
+function fmtTierKey(v, type) {
+  if (v == null || Number(v) < -9e18) return "·";
+  if (type === "timestamptz" || type === "timestamp") {
+    const iso = new Date(Number(v) / 1000).toISOString();
+    return iso.slice(0, 19).replace("T", " ") + (type === "timestamptz" ? "Z" : "");
+  }
+  if (type === "date") {
+    return new Date(Number(v) * 86400000).toISOString().slice(0, 10);
+  }
+  return fmtNum(v);
+}
+
+function fmtLag(v, type) {
+  if (v == null) return "·";
+  const days = type === "timestamptz" || type === "timestamp" ? Number(v) / 86400e6
+    : type === "date" ? Number(v) : null;
+  if (days == null) return fmtNum(v);
+  if (days >= 1) return (Number.isInteger(days) ? days : days.toFixed(1)) + "d";
+  const hours = days * 24;
+  return (Number.isInteger(hours) ? hours : hours.toFixed(1)) + "h";
+}
+
 function fmtAgo(epoch) {
   if (!epoch) return "·";
   const s = Math.max(0, Math.floor(Date.now() / 1000) - epoch);
@@ -159,7 +188,7 @@ function renderOverview(o) {
     return `<tr data-id="${t.id}">
       <td>${esc(t.schema)}.${esc(t.name)}</td>
       <td>${mode}</td>
-      <td>${fmtNum(t.cutlineT)}</td>
+      <td>${tkSymbol(t.tierKeyType)}${fmtTierKey(t.cutlineT, t.tierKeyType)}</td>
       <td>${fmtNum(t.cutlineS)}</td>
       <td>${lag}</td>
       <td>${fmtNum(t.deltaBacklog)}</td>
@@ -219,9 +248,17 @@ function renderTable(t) {
 
   const fleet = (lastOverview?.tables || []).find(x => x.id === t.id) || {};
   const slot = (lastOverview?.slots || []).find(s => s.name === t.slot);
+  const temporal = ["timestamptz", "timestamp", "date"].includes(t.tierKeyType);
+  const cutline = temporal
+    ? `<span class="tk-val">${fmtTierKey(fleet.cutlineT, t.tierKeyType)}</span>`
+    : fmtTierKey(fleet.cutlineT, t.tierKeyType);
   const cells = [
-    card("tier key", esc(t.tierKey), "primary key: " + t.pk.join(", ")),
-    card("cutline T", fmtNum(fleet.cutlineT), "snapshot S: " + fmtNum(fleet.cutlineS), true),
+    card("tier key", esc(t.tierKey)
+      + ' <span class="tk-name">' + tkSymbol(t.tierKeyType)
+      + esc(t.tierKeyType || "bigint") + "</span>",
+      "primary key: " + t.pk.join(", ")),
+    card("cutline T", tkSymbol(t.tierKeyType) + cutline,
+      "snapshot S: " + fmtNum(fleet.cutlineS), true),
     card("delta backlog", fmtNum(fleet.deltaBacklog), "read pins: " + fmtNum(fleet.readPins)),
     card("lake", esc(t.lakeFormat), t.lakeRef),
     card("storage profile", esc(t.storageProfile), "warehouse binding"),
@@ -235,13 +272,14 @@ function renderTable(t) {
     }
   }
   if (t.heapRetentionLag != null) {
-    cells.push(card("heap retention", fmtNum(t.heapRetentionLag), "heap partitions kept behind highwater"));
+    cells.push(card("heap retention", fmtLag(t.heapRetentionLag, t.tierKeyType),
+      "heap partitions kept behind highwater"));
   }
   document.getElementById("detail-meta").innerHTML = cells.join("");
 
   document.getElementById("detail-partitions").innerHTML = t.partitions.map(p => `<tr>
     <td>${esc(p.id)}</td>
-    <td class="dim">[${fmtNum(p.lo)}, ${fmtNum(p.hi)})</td>
+    <td class="dim">[${fmtTierKey(p.lo, t.tierKeyType)}, ${fmtTierKey(p.hi, t.tierKeyType)})</td>
     <td><span class="seg ${p.state}">${p.state}</span></td>
     <td class="dim">${fmtAgo(p.updatedAt)}</td>
   </tr>`).join("");
@@ -541,19 +579,30 @@ function renderResults(out) {
   }
 }
 
+let schemaCache = "";
+
 async function loadSchema() {
   try {
     const { tables } = await getJson("/api/v1/schema");
-    document.getElementById("schema-tree").innerHTML = tables.map((t, i) =>
-      `<div class="schema-table" data-i="${i}">
-        <div class="name">${esc(t.name)}</div>
+    const key = JSON.stringify(tables);
+    if (key === schemaCache) return;
+    schemaCache = key;
+    const tree = document.getElementById("schema-tree");
+    const open = new Set(Array.from(tree.querySelectorAll(".schema-table.open > .name"))
+      .map(el => el.dataset.name));
+    tree.innerHTML = tables.map(t => {
+      const badge = t.partitions
+        ? `<span class="part-count">${fmtNum(t.partitions)} parts</span>` : "";
+      return `<div class="schema-table${open.has(t.name) ? " open" : ""}">
+        <div class="name" data-name="${esc(t.name)}">${esc(t.name)}${badge}</div>
         <div class="cols">${t.columns.map(c =>
           `<div class="col">${esc(c.name)} <span class="type">${esc(c.type)}</span></div>`).join("")}</div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
     document.querySelectorAll(".schema-table > .name").forEach(el => {
       el.addEventListener("click", () => el.parentElement.classList.toggle("open"));
       el.addEventListener("dblclick", () => {
-        editor.replaceSelection(el.textContent);
+        editor.replaceSelection(el.dataset.name);
         editor.focus();
       });
     });

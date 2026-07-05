@@ -3,6 +3,7 @@
 
 use crate::domain::TableId;
 use crate::planner::QueryPlan;
+use crate::tier_key::TierKeyType;
 use crate::{ModakError, Result};
 
 /// Everything the renderer needs to know about one registered table.
@@ -15,6 +16,7 @@ pub struct TableMeta {
     pub columns: Vec<Column>,
     pub pk_cols: Vec<String>,
     pub tier_key_col: String,
+    pub tier_key_type: TierKeyType,
     pub lake_metadata_location: String,
 }
 
@@ -78,7 +80,7 @@ pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
         "SELECT {col_list} FROM {hot_rel} WHERE {tier} >= {t}\n\
          UNION ALL\n\
          {cold}",
-        t = t.0,
+        t = meta.tier_key_type.pg_literal(t.0),
     ))
 }
 
@@ -188,7 +190,7 @@ fn render_cold(t: crate::domain::TierKey, meta: &TableMeta, base: &str) -> Resul
            WHERE d.table_id = {table_id} AND d.op = 0\n\
          ) cold\n\
          WHERE {tier} < {t}",
-        t = t.0,
+        t = meta.tier_key_type.pg_literal(t.0),
     ))
 }
 
@@ -227,6 +229,7 @@ mod tests {
             ],
             pk_cols: vec!["id".into()],
             tier_key_col: "event_time".into(),
+            tier_key_type: TierKeyType::Bigint,
             lake_metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
         }
     }

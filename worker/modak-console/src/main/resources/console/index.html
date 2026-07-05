@@ -104,18 +104,22 @@
   </section>
   <section class="panel">
     <h2>Partitions</h2>
-    <table class="fleet">
-      <thead><tr><th>partition</th><th>tier key range</th><th>state</th><th>updated</th></tr></thead>
-      <tbody id="detail-partitions"></tbody>
-    </table>
+    <div class="scroll-table">
+      <table class="fleet">
+        <thead><tr><th>partition</th><th>tier key range</th><th>state</th><th>updated</th></tr></thead>
+        <tbody id="detail-partitions"></tbody>
+      </table>
+    </div>
     <div class="empty" id="partitions-empty" hidden>No partitions tracked.</div>
   </section>
   <section class="panel">
     <h2>Recent operations</h2>
-    <table class="fleet">
-      <thead><tr><th>kind</th><th>phase</th><th>snapshot</th><th>details</th><th>updated</th></tr></thead>
-      <tbody id="detail-ops"></tbody>
-    </table>
+    <div class="scroll-table">
+      <table class="fleet">
+        <thead><tr><th>kind</th><th>phase</th><th>snapshot</th><th>details</th><th>updated</th></tr></thead>
+        <tbody id="detail-ops"></tbody>
+      </table>
+    </div>
     <div class="empty" id="ops-empty" hidden>No operations journaled yet.</div>
   </section>
 </main>

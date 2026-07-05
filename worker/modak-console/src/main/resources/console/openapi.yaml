@@ -165,7 +165,9 @@ paths:
       summary: Schema tree for the playground browser
       responses:
         "200":
-          description: All non-system tables and their columns.
+          description: >
+            All non-system tables and their columns. Child partitions are
+            rolled up into the parent's partition count, not listed.
           content:
             application/json:
               schema:
@@ -179,6 +181,9 @@ paths:
                         name:
                           type: string
                           example: public.events
+                        partitions:
+                          type: integer
+                          description: Number of child partitions.
                         columns:
                           type: array
                           items:
@@ -432,6 +437,9 @@ components:
           enum: [tiered, mirrored]
         tierKey:
           type: string
+        tierKeyType:
+          type: string
+          enum: [bigint, timestamptz, timestamp, date]
         lakeFormat:
           type: string
         heapRetentionLag:
@@ -502,6 +510,9 @@ components:
             type: string
         tierKey:
           type: string
+        tierKeyType:
+          type: string
+          enum: [bigint, timestamptz, timestamp, date]
         lakeFormat:
           type: string
         lakeRef:

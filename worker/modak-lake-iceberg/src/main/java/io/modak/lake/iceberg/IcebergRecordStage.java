@@ -1,8 +1,12 @@
 package io.modak.lake.iceberg;
 
+import io.modak.common.PgValues;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.iceberg.FileFormat;
@@ -24,11 +28,11 @@ import org.apache.iceberg.types.Types;
 final class IcebergRecordStage {
 
     private final Table table;
-    private final TruncatePartitioning partitioning;
+    private final TierKeyPartitioning partitioning;
 
     IcebergRecordStage(Table table) {
         this.table = table;
-        this.partitioning = TruncatePartitioning.of(table);
+        this.partitioning = TierKeyPartitioning.of(table);
     }
 
     List<String> stage(List<String> columns, Iterable<Object[]> rows) {
@@ -84,7 +88,7 @@ final class IcebergRecordStage {
         if (!partitioning.partitioned()) {
             return 0;
         }
-        return ((Number) record.getField(partitioning.sourceColumn())).longValue();
+        return TierKeys.canonical(record.getField(partitioning.sourceColumn()));
     }
 
     private static Object convert(Object v, Types.NestedField field) {
@@ -108,9 +112,7 @@ final class IcebergRecordStage {
                         ((Types.DecimalType) type).scale(), java.math.RoundingMode.HALF_UP);
                 case UUID -> java.util.UUID.fromString(v.toString());
                 case DATE -> java.time.LocalDate.parse(v.toString());
-                case TIMESTAMP -> ((Types.TimestampType) type).shouldAdjustToUTC()
-                        ? java.time.OffsetDateTime.parse(v.toString())
-                        : java.time.LocalDateTime.parse(v.toString());
+                case TIMESTAMP -> timestamp(v, (Types.TimestampType) type);
                 default -> throw new IllegalArgumentException(
                         "unsupported staging type: " + type);
             };
@@ -118,5 +120,13 @@ final class IcebergRecordStage {
             throw new IllegalArgumentException("cannot convert '" + v + "' to " + type
                     + " for column '" + field.name() + "'", e);
         }
+    }
+
+    private static Object timestamp(Object v, Types.TimestampType type) {
+        OffsetDateTime odt = v instanceof OffsetDateTime o ? o
+                : v instanceof LocalDateTime l
+                        ? l.atOffset(ZoneOffset.UTC)
+                        : PgValues.parseTimestamp(v.toString());
+        return type.shouldAdjustToUTC() ? odt : odt.toLocalDateTime();
     }
 }

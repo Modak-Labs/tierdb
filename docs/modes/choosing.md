@@ -17,7 +17,8 @@ before Modak.
 **Time-series and event data** (telemetry, logs, clickstreams, transactions):
 usually Postgres should hold only a recent window, so the choice is between
 **tiered** and **mirrored with heap retention**. Both need `PARTITION BY
-RANGE` on a bigint tier key, both drop old heap partitions, and both read as
+RANGE` on the tier key (a timestamp, date, or integer column), both drop old
+heap partitions, and both read as
 one seam-split view. What differs is how rows travel to the lake. And when
 Postgres should keep everything anyway, **tiered keep-heap** moves batches to
 the lake without dropping the heap copy.

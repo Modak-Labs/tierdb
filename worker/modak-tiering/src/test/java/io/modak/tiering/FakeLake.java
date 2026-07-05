@@ -58,7 +58,8 @@ final class FakeLake implements LakeStorage {
 
     @Override
     public String createTableIfAbsent(String ref, List<io.modak.common.RowBatchData.Column> cols,
-            java.util.Set<String> requiredCols, String tierKeyCol, long partitionWidth) {
+            java.util.Set<String> requiredCols, String tierKeyCol,
+            io.modak.lake.LakePartition partition) {
         return ref + "/metadata/v0.metadata.json";
     }
 

@@ -100,10 +100,16 @@ final class ConsoleQuery {
     }
 
     private static final String SCHEMA = """
-            SELECT table_schema, table_name, column_name, data_type
-              FROM information_schema.columns
-             WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-             ORDER BY table_schema, table_name, ordinal_position
+            SELECT col.table_schema, col.table_name, col.column_name, col.data_type,
+                   COALESCE(k.n, 0)
+              FROM information_schema.columns col
+              JOIN pg_namespace n ON n.nspname = col.table_schema
+              JOIN pg_class r ON r.relname = col.table_name AND r.relnamespace = n.oid
+              LEFT JOIN (SELECT inhparent, count(*) AS n
+                           FROM pg_inherits GROUP BY inhparent) k ON k.inhparent = r.oid
+             WHERE col.table_schema NOT IN ('pg_catalog', 'information_schema')
+               AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = r.oid)
+             ORDER BY col.table_schema, col.table_name, col.ordinal_position
             """;
 
     String schema() throws Exception {
@@ -111,15 +117,16 @@ final class ConsoleQuery {
                 ResultSet rs = s.executeQuery(SCHEMA)) {
             StringJoiner tables = new StringJoiner(",", "[", "]");
             String currentTable = null;
+            long currentParts = 0;
             StringBuilder columns = null;
             while (rs.next()) {
                 String table = rs.getString(1) + "." + rs.getString(2);
                 if (!table.equals(currentTable)) {
                     if (columns != null) {
-                        tables.add("{\"name\":" + Json.str(currentTable)
-                                + ",\"columns\":[" + columns + "]}");
+                        tables.add(tableJson(currentTable, currentParts, columns));
                     }
                     currentTable = table;
+                    currentParts = rs.getLong(5);
                     columns = new StringBuilder();
                 }
                 if (columns.length() > 0) {
@@ -129,11 +136,16 @@ final class ConsoleQuery {
                         .append(",\"type\":").append(Json.str(rs.getString(4))).append('}');
             }
             if (columns != null) {
-                tables.add("{\"name\":" + Json.str(currentTable)
-                        + ",\"columns\":[" + columns + "]}");
+                tables.add(tableJson(currentTable, currentParts, columns));
             }
             return "{\"tables\":" + tables + "}";
         }
+    }
+
+    private static String tableJson(String name, long partitions, StringBuilder columns) {
+        return "{\"name\":" + Json.str(name)
+                + ",\"partitions\":" + partitions
+                + ",\"columns\":[" + columns + "]}";
     }
 
     private static String message(Exception e) {

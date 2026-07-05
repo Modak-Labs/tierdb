@@ -21,6 +21,7 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.data.GenericAppenderFactory;
 import org.apache.iceberg.data.GenericRecord;
+import org.apache.iceberg.data.InternalRecordWrapper;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFileFactory;
@@ -65,6 +66,9 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
         Schema schema = table.schema();
         PartitionSpec spec = table.spec();
         PartitionKey key = spec.isUnpartitioned() ? null : new PartitionKey(spec, schema);
+        InternalRecordWrapper wrapper = key == null
+                ? null
+                : new InternalRecordWrapper(schema.asStruct());
         for (Object[] row : batch.rows()) {
             GenericRecord record = GenericRecord.create(schema);
             for (int i = 0; i < batch.columns().size(); i++) {
@@ -77,7 +81,7 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
                 record.setField(col.name(), coerce(row[i], field.type()));
             }
             if (key != null) {
-                key.partition(record);
+                key.partition(wrapper.wrap(record));
             }
             writerFor(key).write(record);
         }
@@ -121,7 +125,8 @@ final class IcebergLakeWriter implements LakeWriter<IcebergWriteResult> {
         Schema schema = table.schema();
         String tierKeyCol = schema.findColumnName(spec.fields().get(0).sourceId());
         GenericRecord probe = GenericRecord.create(schema);
-        probe.setField(tierKeyCol, ctx.bounds().lo().value());
+        probe.setField(tierKeyCol, TierKeys.internalValue(
+                schema.findField(tierKeyCol).type(), ctx.bounds().lo().value()));
         PartitionKey key = new PartitionKey(spec, schema);
         key.partition(probe);
         writerFor(key);

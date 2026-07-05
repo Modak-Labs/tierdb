@@ -124,7 +124,7 @@ public final class MirrorWorker implements Runnable {
                 settings.pgUrl(), settings.pgUser(), settings.pgPassword(),
                 meta.slotName(), meta.publicationName(), Lsn.ZERO)) {
             ChangeBatch batch = new ChangeBatch(
-                    table, meta.primaryKeyCols(), meta.tierKeyCol());
+                    table, meta.primaryKeyCols(), meta.tierKeyCol(), meta.tierKeyType());
             boolean inTx = false;
             boolean skipTxn = false;
             Lsn pending = null;

@@ -33,13 +33,14 @@ Onboards a table. See [Registering tables](../tables/registering-tables.md).
 |------|---------|
 | `--table` | `schema.table` of an existing table |
 | `--pk` | Primary key column(s), comma-separated for composite keys |
-| `--tier-key` | The bigint aging column |
+| `--tier-key` | The aging column: `bigint` (or any integer), `timestamptz`, `timestamp`, or `date`. The type is detected |
 | `--mode` | `tiered` (default) or `mirrored` |
-| `--heap-retention` | Mirrored only: drop heap partitions this many tier-key units behind the high-water mark |
-| `--lake-retention` | Tiered only: expire lake rows this many tier-key units behind the cut-line. Needs a partition width. Omit to keep everything |
+| `--heap-retention` | Mirrored only: drop heap partitions this far behind the high-water mark. Temporal keys take durations (`7d`, `12h`), integer keys take numbers |
+| `--lake-retention` | Tiered only: expire lake rows this far behind the cut-line, same units as `--heap-retention`. Needs a partition width. Omit to keep everything |
 | `--keep-heap` | Tiered only: never drop heap partitions, a trigger mirrors their DML into the delta. Excludes `--lake-retention` |
 | `--chunk-rows` | Mirrored only: initial-copy chunk size (default 50000) |
-| `--partition-width` | Iceberg partition band width. `0` = unpartitioned. Tiered tables infer it from the first range partition |
+| `--partition-width` | Lake partition band width for integer keys (`0` = unpartitioned), inferred from the first range partition on tiered tables |
+| `--lake-partition` | Temporal keys only: lake layout `hour`, `day` (default), `month`, `year`, or `none` |
 | `--profile` | Storage profile the table's lake lives on. Omit for the default profile. See [Storage profiles](../tables/storage-profiles.md) |
 
 Re-running `register` is safe: a completed registration is a no-op, an

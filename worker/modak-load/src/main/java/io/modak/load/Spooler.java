@@ -1,6 +1,7 @@
 package io.modak.load;
 
 import io.modak.common.TableId;
+import io.modak.common.TierKeyType;
 import io.modak.connector.SeamState;
 import io.modak.lake.ColdTableSpec;
 import io.modak.lake.commit.CommitterInitContext;
@@ -28,12 +29,13 @@ final class Spooler {
         long max = Long.MIN_VALUE;
         List<Object[]> tuples = new ArrayList<>(rows.size());
         int tierKeyIdx = columns.indexOf(state.tierKeyCol());
+        TierKeyType tierKeyType = TierKeyType.forType(state.tierKeyType());
         for (Map<String, Object> row : rows) {
             Object[] tuple = new Object[columns.size()];
             for (int i = 0; i < columns.size(); i++) {
                 tuple[i] = row.get(columns.get(i));
             }
-            long tierKey = ((Number) tuple[tierKeyIdx]).longValue();
+            long tierKey = tierKeyType.encode(tuple[tierKeyIdx]);
             min = Math.min(min, tierKey);
             max = Math.max(max, tierKey);
             tuples.add(tuple);

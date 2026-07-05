@@ -108,7 +108,7 @@ public final class LoadClient {
             try {
                 entries.add(new DeltaLoader.Entry(
                         BatchRouter.encodePk(row, state.primaryKeyCols(), lineNo),
-                        BatchRouter.tierKey(row, state.tierKeyCol(), lineNo),
+                        BatchRouter.tierKey(row, state, lineNo),
                         MAPPER.writeValueAsString(row)));
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                 throw new LoadException("row is not JSON-encodable", e);

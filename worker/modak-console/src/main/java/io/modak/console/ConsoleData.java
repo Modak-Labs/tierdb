@@ -33,7 +33,7 @@ final class ConsoleData {
                              WHERE p.table_id = t.table_id GROUP BY state) s),
                    (SELECT count(*) FROM modak.load_labels l
                      WHERE l.table_id = t.table_id AND l.state = 'staged'),
-                   ls.stats, jsonb_array_length(ls.warnings)
+                   ls.stats, jsonb_array_length(ls.warnings), t.tier_key_type
               FROM modak.tables t
               LEFT JOIN modak.cutline c USING (table_id)
               LEFT JOIN modak.copy_progress cp USING (table_id)
@@ -71,6 +71,7 @@ final class ConsoleData {
                             + ",\"name\":" + Json.str(rs.getString(3))
                             + ",\"mode\":" + Json.str(rs.getString(4))
                             + ",\"tierKey\":" + Json.str(rs.getString(5))
+                            + ",\"tierKeyType\":" + Json.str(rs.getString(21))
                             + ",\"lakeFormat\":" + Json.str(rs.getString(6))
                             + ",\"heapRetentionLag\":" + Json.num(longOrNull(rs, 7))
                             + ",\"cutlineT\":" + Json.num(longOrNull(rs, 8))
@@ -119,7 +120,7 @@ final class ConsoleData {
                    c.lake_props ->> 'metadata_location',
                    mr.requested_by,
                    extract(epoch FROM mr.requested_at)::bigint,
-                   t.storage_profile
+                   t.storage_profile, t.tier_key_type
               FROM modak.tables t
               LEFT JOIN modak.cutline c USING (table_id)
               LEFT JOIN modak.maintenance_requests mr USING (table_id)
@@ -177,6 +178,7 @@ final class ConsoleData {
                             .append(",\"mode\":").append(Json.str(rs.getString(3)))
                             .append(",\"pk\":").append(pk)
                             .append(",\"tierKey\":").append(Json.str(rs.getString(5)))
+                            .append(",\"tierKeyType\":").append(Json.str(rs.getString(16)))
                             .append(",\"lakeFormat\":").append(Json.str(rs.getString(6)))
                             .append(",\"lakeRef\":").append(Json.str(rs.getString(7)))
                             .append(",\"heapRetentionLag\":").append(Json.num(longOrNull(rs, 8)))

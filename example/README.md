@@ -19,14 +19,16 @@ assume the earlier ones ran.
 | `steps/03-mirroring.sh` | A mirrored table: plain DML trails into an Iceberg mirror via CDC, the same rows served from the heap and from the lake, and a cross-mode join. |
 | `steps/04-lifecycle.sh` | Operations: an initial copy killed mid-flight resumes from its journal, `verify` proves heap and lake match, and `unregister` leaves nothing behind. |
 | `steps/05-stream-load.sh` | Stream Load: labeled micro-batches over HTTP routed per row (heap and delta), and a replayed label returning its recorded result without applying anything. |
+| `steps/06-timestamptz.sh` | A timestamptz tier key: daily partitions tier by day into the lake, and reads and corrections use native timestamp SQL. |
 
 The tables live in `datasets/`:
 
 - `events.sql`: a range-partitioned event stream (the tiered table).
 - `vehicles.sql`: an ordinary OLTP table (the mirrored table).
 - `telemetry.sql`: 20k rows for the kill-and-resume copy.
+- `readings.sql`: a timestamptz time series with daily partitions.
 - `live.sql`: two real-scale time series (hourly partitions, 24h of history)
-  for `live.sh`.
+  for `live.sh`, one keyed on `timestamptz` and one on epoch `bigint`.
 
 To run against the Iceberg REST catalog stack instead of the default
 path-based warehouse:

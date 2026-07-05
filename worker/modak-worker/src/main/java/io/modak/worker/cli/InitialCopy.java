@@ -7,6 +7,7 @@ import io.modak.common.PkCodec;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
+import io.modak.common.TierKeyType;
 import io.modak.lake.ColdTableSpec;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.commit.CommitterInitContext;
@@ -33,14 +34,14 @@ public final class InitialCopy {
 
     static LakeCommitResult run(DataSource ds, LakeStorage lake, TableId table,
             String schema, String tableName, String lakeTableRef,
-            List<String> pkCols, String tierKeyCol, List<Column> columns,
-            Lsn consistentPoint, int chunkRows) throws Exception {
+            List<String> pkCols, String tierKeyCol, TierKeyType tierKeyType,
+            List<Column> columns, Lsn consistentPoint, int chunkRows) throws Exception {
         List<Column> pkColumns = pkColumns(pkCols, columns);
         List<String> lastPk = readLastPk(ds, table);
         LakeCommitResult last = null;
         long chunkNo = 0;
         while (true) {
-            Chunk chunk = readChunk(ds, schema, tableName, pkColumns, tierKeyCol,
+            Chunk chunk = readChunk(ds, schema, tableName, pkColumns, tierKeyCol, tierKeyType,
                     lastPk, chunkRows);
             if (chunk.entries().isEmpty()) {
                 return last;
@@ -92,8 +93,8 @@ public final class InitialCopy {
             List<String> lastPkText) {}
 
     private static Chunk readChunk(DataSource ds, String schema, String tableName,
-            List<Column> pkColumns, String tierKeyCol, List<String> lastPk, int chunkRows)
-            throws Exception {
+            List<Column> pkColumns, String tierKeyCol, TierKeyType tierKeyType,
+            List<String> lastPk, int chunkRows) throws Exception {
         String sql = chunkSql(schema, tableName, pkColumns, lastPk != null, chunkRows);
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
             if (lastPk != null) {
@@ -118,7 +119,7 @@ public final class InitialCopy {
                     }
                     entries.add(new DeltaRowsBatch.Entry(
                             encodePk(row, pkIdx), false,
-                            tierKeyOf(row[tierIdx]), ++version, row));
+                            tierKeyOf(row[tierIdx], tierKeyType), ++version, row));
                 }
                 List<String> lastText = row == null ? null : pkText(row, pkIdx, pkColumns);
                 return new Chunk(columns, entries, lastText);
@@ -185,12 +186,11 @@ public final class InitialCopy {
                 : String.valueOf(value);
     }
 
-    private static long tierKeyOf(Object v) {
-        if (v instanceof Long l) {
-            return l;
+    private static long tierKeyOf(Object v, TierKeyType type) {
+        if (v == null) {
+            throw new IllegalStateException("tier-key is NULL in the initial copy");
         }
-        throw new IllegalStateException("tier-key must decode to a long, got "
-                + (v == null ? "NULL" : v.getClass().getSimpleName()));
+        return type.encode(v);
     }
 
     private static List<Column> columnsOf(ResultSet rs) throws Exception {

@@ -7,7 +7,8 @@ CDC. It runs through the worker binary's CLI, the same jar as the daemon:
 ```bash
 modak-worker register --table <schema.table> --pk <col>[,<col>...] --tier-key <col> \
                       [--mode tiered|mirrored] [--heap-retention <n>] [--lake-retention <n>] \
-                      [--keep-heap] [--chunk-rows <n>] [--partition-width <n>] [--profile <name>]
+                      [--keep-heap] [--chunk-rows <n>] [--partition-width <n>] \
+                      [--lake-partition hour|day|month|year|none] [--profile <name>]
 ```
 
 `--profile` places the table's lake on a named
@@ -25,9 +26,19 @@ full copy anyway, `mirrored` for entity tables, and
 `mirrored --heap-retention N` for time series whose lake copy must trail by
 CDC.
 
-Tiered and heap-retention tables require `PARTITION BY RANGE` on a bigint tier
+Tiered and heap-retention tables require `PARTITION BY RANGE` on the tier
 key. Mirrored tables require a primary key, and composite keys work in both
 modes: `--pk tenant_id,device_id`.
+
+## Tier key types
+
+The tier key can be `bigint` (or any integer), `timestamptz`, `timestamp`, or
+`date`. The type is detected at registration and stored in the catalog, and
+everything downstream (partition bounds, DML routing, lake layout, the
+`modak_*` SQL API) works in the column's native type. For temporal keys the
+lag and width flags take durations: `--heap-retention 7d`,
+`--lake-retention 90d`, `--partition-width 1d` (`s`, `m`, `h`, `d`). Integer
+keys keep taking plain numbers.
 
 ## The full lifecycle
 
@@ -92,15 +103,16 @@ slot's consistent point, so rows changed during the copy are healed by the
 idempotent fold, with no gap and no duplicates. Until the copy lands the table
 has no mirror frontier and the daemon skips it.
 
-## Iceberg partitioning
+## Lake partitioning
 
-New Iceberg tables are laid out as `truncate(tier_key, width)`, one lake
-partition per width-sized tier-key band, so lake engines and maintenance can
-prune by tier key. Tiered tables infer the width from the first Postgres range
-partition. Mirrored and unpartitioned tables stay unpartitioned unless you
-pass `--partition-width` explicitly (`0` forces unpartitioned). The spec
-applies at table creation only. Re-registering does not rewrite an existing
-layout.
+New lake tables are partitioned on the tier key so lake engines and
+maintenance can prune by it. Integer keys are laid out as
+`truncate(tier_key, width)`, one lake partition per width-sized band, with
+the width inferred from the first Postgres range partition (or
+`--partition-width`, `0` forces unpartitioned). Temporal keys default to a
+`day` layout and `--lake-partition hour|day|month|year` overrides it
+(`none` forces unpartitioned). The spec applies at table creation only.
+Re-registering does not rewrite an existing layout.
 
 ## Permissions
 

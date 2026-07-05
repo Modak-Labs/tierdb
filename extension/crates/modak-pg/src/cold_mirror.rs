@@ -8,8 +8,7 @@ use pgrx::prelude::*;
 
 use crate::catalog::catalog_err;
 use crate::delta::{
-    or_error, pk_values, tier_key_of, write_meta, WriteMeta, TOMBSTONE_DELTA_SQL,
-    UPSERT_DELTA_SQL,
+    or_error, pk_values, tier_key_of, write_meta, WriteMeta, TOMBSTONE_DELTA_SQL, UPSERT_DELTA_SQL,
 };
 use crate::dml::fresh_lookup;
 
@@ -40,7 +39,7 @@ fn modak_cold_mirror_route(
 }
 
 fn upsert(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
-    let tier_key = or_error(tier_key_of(row, &meta.tier_key_col));
+    let tier_key = or_error(tier_key_of(row, meta));
     let pk = encode_pk(&or_error(pk_values(row, &meta.pk_cols)));
     or_error(
         Spi::run_with_args(
@@ -57,7 +56,7 @@ fn upsert(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
 }
 
 fn tombstone(t: TableId, meta: &WriteMeta, row: &pgrx::JsonB) {
-    let tier_key = or_error(tier_key_of(row, &meta.tier_key_col));
+    let tier_key = or_error(tier_key_of(row, meta));
     let pk = encode_pk(&or_error(pk_values(row, &meta.pk_cols)));
     let mut payload = serde_json::Map::new();
     for col in &meta.pk_cols {
@@ -114,11 +113,8 @@ fn modak_attach_cold_mirror(table: pg_sys::Oid, partition: pg_sys::Oid) -> Strin
             meta.schema, meta.table
         );
     }
-    let qualified: String = fresh_lookup(
-        "SELECT $1::regclass::text",
-        &[partition.into()],
-    )
-    .unwrap_or_else(|| error!("modak: no relation with oid {}", u32::from(partition)));
+    let qualified: String = fresh_lookup("SELECT $1::regclass::text", &[partition.into()])
+        .unwrap_or_else(|| error!("modak: no relation with oid {}", u32::from(partition)));
 
     let attached = fresh_lookup::<bool>(
         "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = $1 AND tgname = $2)",

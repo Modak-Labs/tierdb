@@ -66,7 +66,8 @@ final class IcebergLakeTable implements LakeTable {
     @Override
     public LakeCommitResult expireBelow(long boundary, Map<String, String> snapshotProps) {
         table.refresh();
-        Expression below = Expressions.lessThan(spec.tierKeyCol(), boundary);
+        Expression below = Expressions.lessThan(spec.tierKeyCol(), TierKeys.internalValue(
+                table.schema().findField(spec.tierKeyCol()).type(), boundary));
         if (!IcebergScans.anyFileMatches(table, below)) {
             return null;
         }

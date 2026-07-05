@@ -15,7 +15,7 @@ class BatchRouterTest {
     private static final long T = 100;
 
     private static SeamState seam(Long retentionLine, boolean heapOnly) {
-        return new SeamState(42L, PK, "ts", heapOnly ? "mirrored" : "tiered",
+        return new SeamState(42L, PK, "ts", "bigint", heapOnly ? "mirrored" : "tiered",
                 "iceberg", "ref", null, null, null, T, retentionLine, null, null);
     }
 

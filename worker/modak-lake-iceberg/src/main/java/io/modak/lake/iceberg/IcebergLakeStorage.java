@@ -3,6 +3,7 @@ package io.modak.lake.iceberg;
 import io.modak.common.RowBatchData.Column;
 import io.modak.lake.ColdTableSpec;
 import io.modak.lake.commit.CommitterInitContext;
+import io.modak.lake.LakePartition;
 import io.modak.lake.LakeSnapshotReader;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.LakeTable;
@@ -57,9 +58,9 @@ public final class IcebergLakeStorage implements LakeStorage {
 
     @Override
     public String createTableIfAbsent(String ref, List<Column> columns,
-            Set<String> requiredCols, String tierKeyCol, long partitionWidth) {
+            Set<String> requiredCols, String tierKeyCol, LakePartition partition) {
         return IcebergTableBootstrap.createIfAbsent(
-                tables, ref, columns, requiredCols, tierKeyCol, partitionWidth);
+                tables, ref, columns, requiredCols, tierKeyCol, partition);
     }
 
     @Override

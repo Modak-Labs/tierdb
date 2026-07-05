@@ -58,6 +58,7 @@ keep-heap only on tiered rows).
 | `schema_name`, `table_name` | The registered relation |
 | `primary_key_cols` | Merge key (array, composite keys supported) |
 | `tier_key_col` | The aging column rows tier by |
+| `tier_key_type` | The column's native type (`bigint`, `timestamptz`, `timestamp`, `date`). All catalog tier-key values are canonical bigint, see [the seam protocol](seam.md#tier-key-types) |
 | `partition_scheme` | Lake partition layout, e.g. `{"width": 3600}` |
 | `lake_format` | Lake plugin id (`iceberg`) |
 | `lake_table_ref` | The format's name for the cold table (path or catalog identifier) |

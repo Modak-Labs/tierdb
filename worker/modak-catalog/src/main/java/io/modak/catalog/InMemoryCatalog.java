@@ -62,7 +62,7 @@ public final class InMemoryCatalog implements Catalog {
                 id, r.schemaName(), r.tableName(), r.primaryKeyCols(), r.tierKeyCol(),
                 r.partitionScheme(), r.lakeFormat(), r.lakeTableRef(), r.storageProfile(),
                 r.mode(), r.publicationName(), r.slotName(), r.heapRetentionLag(),
-                r.lakeRetentionLag(), r.keepHeap(), MaintenancePolicy.NONE));
+                r.lakeRetentionLag(), r.keepHeap(), MaintenancePolicy.NONE, r.tierKeyType()));
         byName.put(key, id);
         return id;
     }
@@ -153,7 +153,8 @@ public final class InMemoryCatalog implements Catalog {
                 cur.id(), cur.schemaName(), cur.tableName(), cur.primaryKeyCols(),
                 cur.tierKeyCol(), cur.partitionScheme(), cur.lakeFormat(), cur.lakeTableRef(),
                 cur.storageProfile(), cur.mode(), cur.publicationName(), cur.slotName(),
-                cur.heapRetentionLag(), cur.lakeRetentionLag(), cur.keepHeap(), policy));
+                cur.heapRetentionLag(), cur.lakeRetentionLag(), cur.keepHeap(), policy,
+                cur.tierKeyType()));
     }
 
     @Override

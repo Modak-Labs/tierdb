@@ -1,5 +1,6 @@
 package io.modak.catalog;
 
+import io.modak.common.TierKeyType;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,13 +24,15 @@ public record TableRegistration(
         Optional<Long> heapRetentionLag,
         Optional<Long> lakeRetentionLag,
         boolean keepHeap,
-        String storageProfile) {
+        String storageProfile,
+        TierKeyType tierKeyType) {
 
     public TableRegistration {
         Objects.requireNonNull(schemaName);
         Objects.requireNonNull(tableName);
         primaryKeyCols = List.copyOf(primaryKeyCols);
         Objects.requireNonNull(tierKeyCol);
+        Objects.requireNonNull(tierKeyType);
         Objects.requireNonNull(partitionScheme);
         Objects.requireNonNull(lakeFormat);
         Objects.requireNonNull(lakeTableRef);
@@ -69,6 +72,28 @@ public record TableRegistration(
     }
 
     public static final String DEFAULT_PROFILE = "default";
+
+    public TableRegistration(
+            long oid,
+            String schemaName,
+            String tableName,
+            List<String> primaryKeyCols,
+            String tierKeyCol,
+            String partitionScheme,
+            String lakeFormat,
+            String lakeTableRef,
+            TableMode mode,
+            String publicationName,
+            String slotName,
+            Optional<Long> heapRetentionLag,
+            Optional<Long> lakeRetentionLag,
+            boolean keepHeap,
+            String storageProfile) {
+        this(oid, schemaName, tableName, primaryKeyCols, tierKeyCol, partitionScheme,
+                lakeFormat, lakeTableRef, mode, publicationName, slotName,
+                heapRetentionLag, lakeRetentionLag, keepHeap, storageProfile,
+                TierKeyType.BIGINT);
+    }
 
     public TableRegistration(
             long oid,

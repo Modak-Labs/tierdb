@@ -3,7 +3,7 @@
 //! and tombstone statements, and the retention floor check.
 
 use modak_core::domain::TableId;
-use modak_core::{ModakError, Result};
+use modak_core::{ModakError, Result, TierKeyType};
 use pgrx::prelude::*;
 
 use crate::catalog::{catalog_err, PgCatalog};
@@ -13,11 +13,12 @@ pub(crate) struct WriteMeta {
     pub table: String,
     pub pk_cols: Vec<String>,
     pub tier_key_col: String,
+    pub tier_key_type: TierKeyType,
     pub keep_heap: bool,
 }
 
 const WRITE_META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col, \
-            keep_heap \
+            tier_key_type, keep_heap \
      FROM modak.tables WHERE table_id = $1";
 
 pub(crate) const UPSERT_DELTA_SQL: &str = "INSERT INTO modak.delta AS d \
@@ -64,6 +65,10 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             .get_by_name::<String, _>("tier_key_col")
             .map_err(catalog_err)?
             .ok_or_else(|| catalog_err("tier_key_col is NULL"))?;
+        let tier_type = row
+            .get_by_name::<String, _>("tier_key_type")
+            .map_err(catalog_err)?
+            .unwrap_or_else(|| "bigint".into());
         let keep_heap = row
             .get_by_name::<bool, _>("keep_heap")
             .map_err(catalog_err)?
@@ -78,6 +83,7 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             table: name,
             pk_cols,
             tier_key_col: tier,
+            tier_key_type: TierKeyType::from_name(&tier_type)?,
             keep_heap,
         })
     })
@@ -128,12 +134,8 @@ pub(crate) fn delete_key_values(
     }
 }
 
-pub(crate) fn tier_key_of(row: &pgrx::JsonB, tier_key_col: &str) -> Result<i64> {
-    json_field_as_text(row, tier_key_col).and_then(|s| {
-        s.parse::<i64>().map_err(|_| {
-            ModakError::Planning(format!("tier-key field '{tier_key_col}' is not a bigint"))
-        })
-    })
+pub(crate) fn tier_key_of(row: &pgrx::JsonB, meta: &WriteMeta) -> Result<i64> {
+    json_field_as_text(row, &meta.tier_key_col).and_then(|s| meta.tier_key_type.encode_text(&s))
 }
 
 pub(crate) fn or_error<T>(r: Result<T>) -> T {
@@ -145,13 +147,14 @@ pub(crate) fn or_error<T>(r: Result<T>) -> T {
 
 /// Rows below the retention line no longer exist in the lake, so a delta entry
 /// for them could never be folded back. Reject instead of silently resurrecting.
-pub(crate) fn check_retention(table: TableId, tier_key: i64) {
+pub(crate) fn check_retention(table: TableId, meta: &WriteMeta, tier_key: i64) {
     if let Some(line) = or_error(PgCatalog.retention_line(table)) {
         if tier_key < line.0 {
             error!(
-                "modak: tier_key {tier_key} is below the retention line {}, \
+                "modak: tier_key {} is below the retention line {}, \
                  rows this old have been expired from the lake",
-                line.0
+                meta.tier_key_type.pg_literal(tier_key),
+                meta.tier_key_type.pg_literal(line.0)
             );
         }
     }

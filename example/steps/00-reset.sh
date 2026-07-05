@@ -13,10 +13,10 @@ fi
 
 docker rm -f modak-example-copy >/dev/null 2>&1 || true
 
-for t in events vehicles telemetry; do
+for t in events vehicles telemetry readings; do
     docker compose run --rm worker unregister --table "public.$t" --drop-lake
 done
-$PSQL -c "DROP TABLE IF EXISTS public.events, public.vehicles, public.telemetry" >/dev/null
+$PSQL -c "DROP TABLE IF EXISTS public.events, public.vehicles, public.telemetry, public.readings" >/dev/null
 
 if [ "${EXAMPLE_REST:-0}" = "1" ]; then
     docker compose restart iceberg-rest >/dev/null

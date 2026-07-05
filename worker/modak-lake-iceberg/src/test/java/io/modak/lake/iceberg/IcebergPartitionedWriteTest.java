@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.modak.common.DeltaRowsBatch;
 import io.modak.common.PartitionBounds;
 import io.modak.common.PartitionId;
+import io.modak.lake.LakePartition;
 import io.modak.common.RowBatchData;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
@@ -60,7 +61,7 @@ class IcebergPartitionedWriteTest {
         tables = IcebergTables.from(Map.of(), new Configuration());
         ref = tmp.resolve("public.events").toString();
         IcebergTableBootstrap.createIfAbsent(
-                tables, ref, COLUMNS, Set.of("id", "ts"), "ts", 100);
+                tables, ref, COLUMNS, Set.of("id", "ts"), "ts", LakePartition.truncate(100));
     }
 
     private static Map<String, String> props(String kind) {
@@ -175,7 +176,7 @@ class IcebergPartitionedWriteTest {
     void unpartitionedTablesKeepTheSingleWriterLayout() throws Exception {
         String flatRef = tmp.resolve("public.flat").toString();
         IcebergTableBootstrap.createIfAbsent(
-                tables, flatRef, COLUMNS, Set.of("id", "ts"), "ts", 0);
+                tables, flatRef, COLUMNS, Set.of("id", "ts"), "ts", LakePartition.none());
         assertTrue(tables.load(flatRef).spec().isUnpartitioned());
     }
 }

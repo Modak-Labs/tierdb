@@ -7,6 +7,7 @@ import io.modak.common.PartitionId;
 import io.modak.common.PgValues;
 import io.modak.common.RowBatchData;
 import io.modak.common.RowBatchData.Column;
+import io.modak.common.TierKeyType;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -36,8 +37,9 @@ public final class JdbcHotSource implements HotSource {
                 + " WHERE " + ident(table.tierKeyCol()) + " >= ? AND " + ident(table.tierKeyCol()) + " < ?";
         try (Connection c = dataSource.getConnection();
                 PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setLong(1, partition.bounds().lo().value());
-            ps.setLong(2, partition.bounds().hi().value());
+            TierKeyType codec = table.tierKeyType();
+            ps.setObject(1, codec.decode(partition.bounds().lo().value()));
+            ps.setObject(2, codec.decode(partition.bounds().hi().value()));
             try (ResultSet rs = ps.executeQuery()) {
                 List<Column> columns = columnsOf(rs.getMetaData());
                 List<Object[]> rows = new ArrayList<>();

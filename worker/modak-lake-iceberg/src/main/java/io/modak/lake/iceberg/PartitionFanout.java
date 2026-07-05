@@ -17,11 +17,11 @@ final class PartitionFanout<W> {
         W create(PartitionKey partition) throws IOException;
     }
 
-    private final TruncatePartitioning partitioning;
+    private final TierKeyPartitioning partitioning;
     private final Factory<W> factory;
     private final Map<PartitionKey, W> writers = new HashMap<>();
 
-    PartitionFanout(TruncatePartitioning partitioning, Factory<W> factory) {
+    PartitionFanout(TierKeyPartitioning partitioning, Factory<W> factory) {
         this.partitioning = partitioning;
         this.factory = factory;
     }

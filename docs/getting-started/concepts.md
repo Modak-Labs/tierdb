@@ -5,11 +5,16 @@ without re-explaining.
 
 ## Tier key
 
-Every registered table names one bigint column as its tier key: the axis
-along which data ages, such as an event time, a sequence number, or an
-epoch. The tier key alone decides where a row lives. It is declared at
-registration (`--tier-key`) and rarely changes for a row. When an update
-does change it, Modak moves the row to where the new value says it belongs.
+Every registered table names one column as its tier key: the axis along
+which data ages, such as an event time, a sequence number, or an epoch. The
+column can be `bigint` (or any integer), `timestamptz`, `timestamp`, or
+`date`. Internally every type maps onto one canonical 64-bit axis through an
+order-preserving codec (microseconds since the epoch for timestamps, days
+for dates), so the catalog, the protocol, and the routing logic are the same
+for all of them. The tier key alone decides where a row lives. It is declared
+at registration (`--tier-key`, the type is detected) and rarely changes for a
+row. When an update does change it, Modak moves the row to where the new
+value says it belongs.
 
 ## Table modes
 

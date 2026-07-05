@@ -11,8 +11,11 @@ import io.modak.common.Lsn;
 import io.modak.common.OpKind;
 import io.modak.common.PgValues;
 import io.modak.common.RowBatchData.Column;
+import io.modak.common.RowBatchData.ColumnType;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
+import io.modak.common.TierKeyType;
+import io.modak.lake.LakePartition;
 import io.modak.lake.LakeStorage;
 import io.modak.lake.commit.CommittedLakeSnapshot;
 import io.modak.lake.commit.CommitterInitContext;
@@ -68,14 +71,9 @@ public final class TableRegistrar {
         String tierKey = parsed.required("--tier-key");
         TableMode mode = TableMode.fromSql(parsed.optional("--mode", "tiered"));
         String heapRetentionArg = parsed.optional("--heap-retention", null);
-        Optional<Long> heapRetentionLag = heapRetentionArg == null
-                ? Optional.empty()
-                : Optional.of(Long.parseLong(heapRetentionArg));
         String lakeRetentionArg = parsed.optional("--lake-retention", null);
-        Optional<Long> lakeRetentionLag = lakeRetentionArg == null
-                ? Optional.empty()
-                : Optional.of(Long.parseLong(lakeRetentionArg));
-        if (lakeRetentionLag.isPresent() && mode != TableMode.TIERED) {
+        String lakePartitionArg = parsed.optional("--lake-partition", null);
+        if (lakeRetentionArg != null && mode != TableMode.TIERED) {
             throw new IllegalArgumentException("--lake-retention applies only to tiered "
                     + "tables: a mirrored heap drop relies on the lake holding full history");
         }
@@ -84,7 +82,7 @@ public final class TableRegistrar {
             throw new IllegalArgumentException("--keep-heap applies only to tiered tables: "
                     + "a mirrored heap is already kept unless --heap-retention says otherwise");
         }
-        if (keepHeap && lakeRetentionLag.isPresent()) {
+        if (keepHeap && lakeRetentionArg != null) {
             throw new IllegalArgumentException("--keep-heap and --lake-retention exclude "
                     + "each other: keep-heap means nothing is deleted anywhere");
         }
@@ -111,9 +109,19 @@ public final class TableRegistrar {
             }
         }
 
-        long partitionWidth = partitionWidth(widthArg, mode, ds, qualified);
-        if (partitionWidth > 0) {
-            Log.info("lake layout: truncate(%s, %d)", tierKey, partitionWidth);
+        TierKeyType tierKeyType = tierKeyTypeOf(ds, schema, table, tierKey);
+        Optional<Long> heapRetentionLag = heapRetentionArg == null
+                ? Optional.empty()
+                : Optional.of(tierKeyType.parseLagOrWidth(heapRetentionArg));
+        Optional<Long> lakeRetentionLag = lakeRetentionArg == null
+                ? Optional.empty()
+                : Optional.of(tierKeyType.parseLagOrWidth(lakeRetentionArg));
+
+        long partitionWidth = partitionWidth(widthArg, mode, ds, qualified, tierKeyType);
+        LakePartition lakePartition = lakePartition(lakePartitionArg, tierKeyType, partitionWidth);
+        if (!lakePartition.isNone()) {
+            Log.info("lake layout: %s(%s)%s", lakePartition.transform(), tierKey,
+                    lakePartition.isTruncate() ? " width " + partitionWidth : "");
         }
         if (lakeRetentionLag.isPresent() && partitionWidth <= 0) {
             throw new IllegalArgumentException("--lake-retention needs a partition width "
@@ -123,43 +131,91 @@ public final class TableRegistrar {
 
         String location = lake.tableRef(schema, table);
         String metadataLocation = lake.createTableIfAbsent(
-                location, columns, required, tierKey, partitionWidth);
+                location, columns, required, tierKey, lakePartition);
         Log.info("cold table ready at %s", location);
 
-        String partitionScheme = "{\"unit\":\"range\",\"partition_width\":" + partitionWidth + "}";
+        String partitionScheme = "{\"unit\":\"range\",\"partition_width\":" + partitionWidth
+                + ",\"lake_transform\":\"" + lakePartition.transform() + "\"}";
 
         String lakeProps = "{\"metadata_location\": \""
                 + metadataLocation.replace("\"", "\\\"") + "\"}";
 
         if (mode == TableMode.MIRRORED) {
-            registerMirrored(config, lake, ds, catalog, schema, table, pks, tierKey,
+            registerMirrored(config, lake, ds, catalog, schema, table, pks, tierKey, tierKeyType,
                     location, lakeProps, heapRetentionLag, partitionScheme, columns,
                     chunkRows, profileName, lakeFormat);
         } else {
-            registerTiered(ds, catalog, qualified, schema, table, pks, tierKey,
+            registerTiered(ds, catalog, qualified, schema, table, pks, tierKey, tierKeyType,
                     location, lakeProps, partitionScheme, lakeRetentionLag, keepHeap,
                     profileName, lakeFormat);
         }
     }
 
     private static long partitionWidth(String widthArg, TableMode mode,
-            DataSource ds, String qualified) {
+            DataSource ds, String qualified, TierKeyType tierKeyType) {
         if (widthArg != null) {
-            long width = Long.parseLong(widthArg);
+            long width = tierKeyType.parseLagOrWidth(widthArg);
             if (width < 0) {
-                throw new IllegalArgumentException("--partition-width must be >= 0: " + width);
+                throw new IllegalArgumentException("--partition-width must be >= 0: " + widthArg);
             }
             return width;
         }
         if (mode == TableMode.TIERED) {
-            return io.modak.tiering.PartitionSync.firstRangeWidth(ds, qualified).orElse(0);
+            return io.modak.tiering.PartitionSync.firstRangeWidth(ds, qualified, tierKeyType)
+                    .orElse(0);
         }
         return 0;
     }
 
+    private static LakePartition lakePartition(String arg, TierKeyType tierKeyType,
+            long partitionWidth) {
+        boolean temporal = tierKeyType.columnType() == ColumnType.TIMESTAMP
+                || tierKeyType.columnType() == ColumnType.DATE;
+        if (arg != null) {
+            String t = arg.toLowerCase(java.util.Locale.ROOT);
+            if (t.equals("none")) {
+                return LakePartition.none();
+            }
+            if (!temporal) {
+                throw new IllegalArgumentException("--lake-partition " + arg
+                        + " needs a temporal tier key, " + tierKeyType.sql()
+                        + " keys are laid out with truncate via --partition-width");
+            }
+            if (t.equals("hour") && tierKeyType == TierKeyType.DATE) {
+                throw new IllegalArgumentException(
+                        "--lake-partition hour is finer than a date tier key");
+            }
+            return LakePartition.temporal(t);
+        }
+        if (temporal) {
+            return LakePartition.temporal("day");
+        }
+        return LakePartition.truncate(partitionWidth);
+    }
+
+    private static TierKeyType tierKeyTypeOf(DataSource ds, String schema, String table,
+            String column) throws Exception {
+        String sql = """
+                SELECT data_type FROM information_schema.columns
+                 WHERE table_schema = ? AND table_name = ? AND column_name = ?
+                """;
+        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, schema);
+            ps.setString(2, table);
+            ps.setString(3, column);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new IllegalArgumentException(
+                            "tier key column not found: " + schema + "." + table + "." + column);
+                }
+                return TierKeyType.forType(rs.getString(1));
+            }
+        }
+    }
+
     private static void registerTiered(DataSource ds, JdbcCatalog catalog,
             String qualified, String schema, String table, List<String> pks, String tierKey,
-            String location, String lakeProps, String partitionScheme,
+            TierKeyType tierKeyType, String location, String lakeProps, String partitionScheme,
             Optional<Long> lakeRetentionLag, boolean keepHeap,
             String profileName, String lakeFormat) throws Exception {
         TableId id = catalog.register(new TableRegistration(
@@ -167,7 +223,7 @@ public final class TableRegistrar {
                 pks, tierKey,
                 partitionScheme, lakeFormat, location,
                 TableMode.TIERED, null, null, Optional.empty(), lakeRetentionLag, keepHeap,
-                profileName));
+                profileName, tierKeyType));
 
         RegisteredTable registered = catalog.get(id).orElseThrow();
         int partitions = new io.modak.tiering.PartitionSync(ds, catalog).sync(registered);
@@ -202,7 +258,7 @@ public final class TableRegistrar {
 
     private static void registerMirrored(WorkerConfig config, LakeStorage lake,
             DataSource ds, JdbcCatalog catalog,
-            String schema, String table, List<String> pks, String tierKey,
+            String schema, String table, List<String> pks, String tierKey, TierKeyType tierKeyType,
             String location, String lakeProps, Optional<Long> heapRetentionLag,
             String partitionScheme, List<Column> columns, int chunkRows,
             String profileName, String lakeFormat) throws Exception {
@@ -247,7 +303,7 @@ public final class TableRegistrar {
                     oid, schema, table, pks, tierKey,
                     partitionScheme, lakeFormat, location,
                     TableMode.MIRRORED, publication, slot, heapRetentionLag,
-                    Optional.empty(), false, profileName));
+                    Optional.empty(), false, profileName, tierKeyType));
             catalog.initCutline(id, new TierKey(Long.MIN_VALUE), new LakeSnapshotId(0), lakeProps);
             InitialCopy.begin(ds, id, consistentPoint);
         } else {
@@ -256,13 +312,14 @@ public final class TableRegistrar {
             RegisteredTable meta = existing.get();
             pks = meta.primaryKeyCols();
             tierKey = meta.tierKeyCol();
+            tierKeyType = meta.tierKeyType();
             heapRetentionLag = meta.heapRetentionLag();
             location = meta.lakeTableRef();
             Log.info("resuming initial copy for %s from the journal", qualified);
         }
 
         LakeCommitResult copied = InitialCopy.run(ds, lake, id, schema, table, location,
-                pks, tierKey, columns, consistentPoint, chunkRows);
+                pks, tierKey, tierKeyType, columns, consistentPoint, chunkRows);
 
         LakeSnapshotId snapshot;
         Map<String, String> publish;

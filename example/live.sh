@@ -16,7 +16,7 @@ if [ "${1:-}" = "reset" ]; then
 fi
 
 if ! $PSQL -tA -c "SELECT 1 FROM modak.tables WHERE table_name = 'sensor_readings'" | grep -q 1; then
-    say "L1. Two live tables with 24h of history (datasets/live.sql)"
+    say "L1. Two live tables with 24h of history (datasets/live.sql, timestamptz + bigint keys)"
     $PSQL -c "DROP TABLE IF EXISTS public.sensor_readings, public.trades" >/dev/null
     $PSQL < example/datasets/live.sql
 
@@ -48,7 +48,7 @@ i=0
 while true; do
     $PSQL >/dev/null <<'SQL'
 INSERT INTO public.sensor_readings
-SELECT extract(epoch FROM now())::bigint * 10 + n, extract(epoch FROM now())::bigint,
+SELECT extract(epoch FROM now())::bigint * 10 + n, now(),
        'device-' || (n % 7), 20 + 10 * sin(extract(epoch FROM now()) / 3600.0) + random()
 FROM generate_series(0, 9) n;
 INSERT INTO public.trades
@@ -61,7 +61,7 @@ SQL
         $PSQL >/dev/null <<'SQL'
 WITH cold AS (SELECT (extract(epoch FROM now())::bigint - 12 * 3600) / 2 * 2 AS ts)
 SELECT modak_upsert('public.sensor_readings'::regclass,
-           jsonb_build_object('id', ts * 10, 'ts', ts,
+           jsonb_build_object('id', ts * 10, 'ts', to_timestamp(ts),
                               'device', 'device-corrected', 'reading', -1)),
        modak_delete('public.trades'::regclass, to_jsonb(ts * 10), ts)
 FROM cold;

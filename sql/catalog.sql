@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS modak.tables (
     table_name          text        NOT NULL,
     primary_key_cols    text[]      NOT NULL,
     tier_key_col        text        NOT NULL,
+    tier_key_type       text        NOT NULL DEFAULT 'bigint',
     partition_scheme    jsonb       NOT NULL,
     lake_format         text        NOT NULL,
     lake_table_ref      text        NOT NULL,

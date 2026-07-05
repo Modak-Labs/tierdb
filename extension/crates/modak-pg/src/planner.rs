@@ -10,6 +10,7 @@ use crate::catalog::{catalog_err, PgCatalog};
 use crate::pin::PgReadPins;
 
 const META_SQL: &str = "SELECT t.schema_name, t.table_name, t.primary_key_cols, t.tier_key_col, \
+            t.tier_key_type, \
             c.lake_props ->> 'metadata_location' AS metadata_location \
      FROM modak.tables t LEFT JOIN modak.cutline c USING (table_id) \
      WHERE t.table_id = $1";
@@ -21,7 +22,7 @@ const COLUMNS_SQL: &str = "SELECT a.attname::text AS name, \
      ORDER BY a.attnum";
 
 pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
-    let (schema, name, pk_cols, tier_col, metadata_location) = Spi::connect(|client| {
+    let (schema, name, pk_cols, tier_col, tier_type, metadata_location) = Spi::connect(|client| {
         let mut rows = client
             .select(META_SQL, Some(1), &[(table.0 as i64).into()])
             .map_err(catalog_err)?;
@@ -38,10 +39,13 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
         let tier = row
             .get_by_name::<String, _>("tier_key_col")
             .map_err(catalog_err)?;
+        let tier_type = row
+            .get_by_name::<String, _>("tier_key_type")
+            .map_err(catalog_err)?;
         let meta = row
             .get_by_name::<String, _>("metadata_location")
             .map_err(catalog_err)?;
-        Ok::<_, ModakError>((schema, name, pk, tier, meta))
+        Ok::<_, ModakError>((schema, name, pk, tier, tier_type, meta))
     })?;
 
     let schema = schema.ok_or_else(|| catalog_err("schema_name is NULL"))?;
@@ -92,6 +96,9 @@ pub(crate) fn table_meta(table: TableId) -> Result<TableMeta> {
         columns,
         pk_cols,
         tier_key_col: tier_col.ok_or_else(|| catalog_err("tier_key_col is NULL"))?,
+        tier_key_type: modak_core::TierKeyType::from_name(
+            &tier_type.unwrap_or_else(|| "bigint".into()),
+        )?,
         lake_metadata_location: metadata_location,
     })
 }

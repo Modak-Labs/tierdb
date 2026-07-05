@@ -17,8 +17,8 @@ public final class HotHighWater {
                 Statement s = c.createStatement();
                 ResultSet rs = s.executeQuery(sql)) {
             rs.next();
-            long v = rs.getLong(1);
-            return rs.wasNull() ? null : v;
+            Object v = rs.getObject(1);
+            return v == null ? null : meta.tierKeyType().encode(v);
         } catch (SQLException e) {
             throw new TieringException("high-water probe failed for " + meta.tableName(), e);
         }

@@ -1233,7 +1233,10 @@ mod tests {
         let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM modak.delta WHERE pk = '1'")
             .expect("delta")
             .unwrap();
-        assert_eq!(payload.0["val"], "v2", "the update overwrites the delta image");
+        assert_eq!(
+            payload.0["val"], "v2",
+            "the update overwrites the delta image"
+        );
 
         Spi::run("DELETE FROM public.events WHERE id = 1").expect("plain delete");
         assert_eq!(count("SELECT count(*) FROM public.events_p0"), 0);
@@ -1261,10 +1264,8 @@ mod tests {
         Spi::run("INSERT INTO public.events VALUES (1, 50, 'old')").expect("seed");
         Spi::run("CREATE TABLE public.fixes (id bigint, v text)").expect("aux table");
         Spi::run("INSERT INTO public.fixes VALUES (1, 'fixed')").expect("aux row");
-        Spi::run(
-            "UPDATE public.events e SET val = f.v FROM public.fixes f WHERE e.id = f.id",
-        )
-        .expect("FROM/USING guard does not apply to keep-heap tables");
+        Spi::run("UPDATE public.events e SET val = f.v FROM public.fixes f WHERE e.id = f.id")
+            .expect("FROM/USING guard does not apply to keep-heap tables");
         let payload = Spi::get_one::<pgrx::JsonB>("SELECT payload FROM modak.delta WHERE pk = '1'")
             .expect("delta")
             .unwrap();
@@ -1281,7 +1282,10 @@ mod tests {
         let op = Spi::get_one::<i16>("SELECT op FROM modak.delta WHERE pk = '1'")
             .expect("delta")
             .unwrap();
-        assert_eq!(op, 1, "the DELETE half of the move tombstones the cold image");
+        assert_eq!(
+            op, 1,
+            "the DELETE half of the move tombstones the cold image"
+        );
     }
 
     #[pg_test]
@@ -1337,7 +1341,11 @@ mod tests {
                 .unwrap();
         assert_eq!(dropped, 1);
         Spi::run("INSERT INTO public.events VALUES (9, 50, 'unmirrored')").expect("insert");
-        assert_eq!(count("SELECT count(*) FROM modak.delta"), 0, "trigger is gone");
+        assert_eq!(
+            count("SELECT count(*) FROM modak.delta"),
+            0,
+            "trigger is gone"
+        );
     }
 
     #[pg_test]
@@ -1482,6 +1490,165 @@ mod tests {
         explain("DELETE FROM public.events WHERE event_time < 50");
         assert_eq!(count("SELECT count(*) FROM public.events"), 0);
         assert_eq!(count("SELECT count(*) FROM modak.delta"), 0);
+    }
+
+    // Canonical micros for the timestamptz fixtures: T = 2026-07-01 00:00:00+00.
+    const TS_CUT: i64 = 1_782_864_000_000_000;
+
+    fn seed_timestamptz_table() -> pg_sys::Oid {
+        Spi::run("SET modak.transparent_reads = off").expect("guc");
+        Spi::run(CATALOG_DDL).expect("catalog.sql applies");
+        Spi::run(
+            "CREATE TABLE public.metrics (id bigint PRIMARY KEY, ts timestamptz NOT NULL, val text)",
+        )
+        .expect("hot relation");
+        Spi::run(&format!(
+            "INSERT INTO modak.tables (table_id, schema_name, table_name, primary_key_cols,
+                                       tier_key_col, tier_key_type, partition_scheme, lake_format, lake_table_ref)
+             SELECT 'public.metrics'::regclass::oid::bigint, 'public', 'metrics', ARRAY['id'], 'ts',
+                    'timestamptz', '{{\"unit\":\"day\"}}', 'iceberg', 'warehouse.metrics'",
+        ))
+        .expect("register");
+        Spi::run(&format!(
+            "INSERT INTO modak.cutline (table_id, tier_key_hi, lake_snapshot_id, lake_props)
+             SELECT 'public.metrics'::regclass::oid::bigint, {TS_CUT}, 7,
+                    '{{\"metadata_location\":\"/wh/metrics/metadata/00002-abc.metadata.json\"}}'",
+        ))
+        .expect("cutline");
+        Spi::get_one::<pg_sys::Oid>("SELECT 'public.metrics'::regclass::oid")
+            .expect("oid")
+            .unwrap()
+    }
+
+    fn seed_timestamptz_transparent() -> pg_sys::Oid {
+        let oid = seed_timestamptz_table();
+        Spi::run("CREATE SCHEMA duckdb").expect("stub schema");
+        Spi::run("CREATE TABLE public.fake_cold (r jsonb)").expect("fake cold tier");
+        Spi::run(
+            r#"INSERT INTO public.fake_cold VALUES
+                 ('{"id": 1, "ts": "2026-06-29T08:00:00+00:00", "val": "a"}'),
+                 ('{"id": 2, "ts": "2026-06-30T12:00:00+00:00", "val": "b"}')"#,
+        )
+        .expect("cold rows");
+        Spi::run(
+            "CREATE FUNCTION duckdb.query(sql text) RETURNS SETOF jsonb \
+             LANGUAGE sql AS 'SELECT r FROM public.fake_cold'",
+        )
+        .expect("duckdb.query stub");
+        // pg_duckdb resolves r['ts']::timestamptz natively, the jsonb stub needs a cast.
+        Spi::run(
+            "CREATE FUNCTION public.jsonb_to_tstz(j jsonb) RETURNS timestamptz \
+             LANGUAGE sql AS 'SELECT (j #>> ''{}'')::timestamptz'",
+        )
+        .expect("cast fn");
+        Spi::run(
+            "CREATE CAST (jsonb AS timestamp with time zone) \
+             WITH FUNCTION public.jsonb_to_tstz(jsonb)",
+        )
+        .expect("stub cast");
+        Spi::run("INSERT INTO public.metrics VALUES (7, '2026-07-02 09:00:00+00', 'recent')")
+            .expect("hot row");
+        Spi::run("SET modak.transparent_reads = on").expect("guc");
+        oid
+    }
+
+    #[pg_test]
+    fn test_timestamptz_rewrite_scan_renders_native_literals() {
+        let oid = seed_timestamptz_table();
+        let sql = Spi::get_one_with_args::<String>("SELECT modak_rewrite_scan($1)", &[oid.into()])
+            .expect("rewrite")
+            .unwrap();
+        assert!(
+            sql.contains("\"ts\" >= TIMESTAMPTZ '2026-07-01 00:00:00.000000+00'"),
+            "hot bound is a native literal:\n{sql}"
+        );
+        assert!(
+            sql.contains("\"ts\" < TIMESTAMPTZ '2026-07-01 00:00:00.000000+00'"),
+            "cold bound is a native literal:\n{sql}"
+        );
+        assert!(
+            sql.contains("r['ts']::timestamp with time zone"),
+            "typed duckdb.row subscript:\n{sql}"
+        );
+    }
+
+    #[pg_test]
+    fn test_timestamptz_transparent_select_spans_both_tiers() {
+        seed_timestamptz_transparent();
+        assert_eq!(count("SELECT count(*) FROM public.metrics"), 3);
+        assert_eq!(
+            count("SELECT count(*) FROM public.metrics WHERE ts < '2026-07-01 00:00:00+00'"),
+            2
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM public.metrics WHERE id = 2"),
+            1,
+            "cold-only row visible through plain SQL"
+        );
+    }
+
+    #[pg_test]
+    fn test_timestamptz_upsert_and_native_delete_route_by_encoded_key() {
+        let oid = seed_timestamptz_table();
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT modak_upsert($1, '{\"id\": 3, \"ts\": \"2026-06-30T12:00:00+00:00\", \"val\": \"corrected\"}'::jsonb)",
+            &[oid.into()],
+        )
+        .expect("upsert cold")
+        .unwrap();
+        assert_eq!(target, "delta");
+        let tier = Spi::get_one::<i64>("SELECT tier_key FROM modak.delta WHERE pk = '3'")
+            .expect("delta row")
+            .unwrap();
+        assert_eq!(tier, TS_CUT - 12 * 3_600_000_000, "canonical micros");
+
+        Spi::run("INSERT INTO public.metrics VALUES (7, '2026-07-02 09:00:00+00', 'recent')")
+            .expect("hot row");
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT modak_delete($1, '7', TIMESTAMPTZ '2026-07-02 09:00:00+00')",
+            &[oid.into()],
+        )
+        .expect("native hot delete")
+        .unwrap();
+        assert_eq!(target, "hot");
+        assert_eq!(count("SELECT count(*) FROM public.metrics"), 0);
+
+        let target = Spi::get_one_with_args::<String>(
+            "SELECT modak_delete($1, '2', TIMESTAMPTZ '2026-06-30 12:00:00+00')",
+            &[oid.into()],
+        )
+        .expect("native cold delete")
+        .unwrap();
+        assert_eq!(target, "delta");
+    }
+
+    #[pg_test]
+    fn test_timestamptz_update_provably_hot_stays_untouched() {
+        seed_timestamptz_transparent();
+        let id = Spi::get_one::<i64>(
+            "UPDATE public.metrics SET val = 'seen' \
+             WHERE ts >= '2026-07-01 00:00:00+00' RETURNING id",
+        )
+        .expect("timestamptz const proves hot")
+        .unwrap();
+        assert_eq!(id, 7);
+        assert_eq!(count("SELECT count(*) FROM modak.delta"), 0);
+    }
+
+    #[pg_test]
+    fn test_timestamptz_cold_update_writes_canonical_delta() {
+        seed_timestamptz_transparent();
+        Spi::run("UPDATE public.metrics SET val = 'fixed' WHERE id = 2").expect("cold update");
+        let (tier, payload) = Spi::get_two::<i64, pgrx::JsonB>(
+            "SELECT tier_key, payload FROM modak.delta WHERE pk = '2'",
+        )
+        .expect("delta row");
+        assert_eq!(tier, Some(TS_CUT - 12 * 3_600_000_000));
+        assert_eq!(payload.unwrap().0["val"], "fixed");
+        let val = Spi::get_one::<String>("SELECT val FROM public.metrics WHERE id = 2")
+            .expect("read")
+            .unwrap();
+        assert_eq!(val, "fixed", "the correction reads back through the overlay");
     }
 
     #[pg_test]

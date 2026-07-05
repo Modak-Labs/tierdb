@@ -314,7 +314,7 @@ unsafe fn substitute(rte: *mut pg_sys::RangeTblEntry, ctx: &mut WalkContext, kin
             meta.hot_schema,
             meta.hot_table,
             meta.tier_key_col,
-            cut.t.0,
+            meta.tier_key_type.pg_literal(cut.t.0),
             cut.snapshot.0,
             delta.entries.len(),
         );
@@ -345,8 +345,9 @@ unsafe fn hybrid_cutline(table: TableId, meta: &modak_core::sqlgen::TableMeta) -
     }
     let stored = or_error(PgCatalog.current(table));
     let sql = format!(
-        "SELECT max({}) FROM {}.{}",
-        quote_ident(&meta.tier_key_col),
+        "SELECT {} FROM {}.{}",
+        meta.tier_key_type
+            .canonical_expr(&format!("max({})", quote_ident(&meta.tier_key_col))),
         quote_ident(&meta.hot_schema),
         quote_ident(&meta.hot_table),
     );

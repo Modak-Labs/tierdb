@@ -1,6 +1,7 @@
 package io.modak.load;
 
 import io.modak.common.PkCodec;
+import io.modak.common.TierKeyType;
 import io.modak.connector.SeamState;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -40,7 +41,7 @@ final class BatchRouter {
                 throw new LoadException("row " + lineNo + " repeats a primary key already in "
                         + "this batch; upsert order within one batch would be undefined");
             }
-            long tierKey = tierKey(row, state.tierKeyCol(), lineNo);
+            long tierKey = tierKey(row, state, lineNo);
             if (state.heapIsComplete() || tierKey >= state.tierKeyHi()) {
                 hot.add(row);
                 continue;
@@ -59,13 +60,18 @@ final class BatchRouter {
                 spool ? cold : List.of());
     }
 
-    static long tierKey(Map<String, Object> row, String tierKeyCol, int lineNo) {
-        Object v = row.get(tierKeyCol);
-        if (!(v instanceof Number n)) {
-            throw new LoadException("row " + lineNo + " is missing a numeric tier-key column '"
-                    + tierKeyCol + "'");
+    static long tierKey(Map<String, Object> row, SeamState state, int lineNo) {
+        Object v = row.get(state.tierKeyCol());
+        if (v == null) {
+            throw new LoadException("row " + lineNo + " is missing the tier-key column '"
+                    + state.tierKeyCol() + "'");
         }
-        return n.longValue();
+        try {
+            return TierKeyType.forType(state.tierKeyType()).encode(v);
+        } catch (RuntimeException e) {
+            throw new LoadException("row " + lineNo + " has an invalid tier-key value '"
+                    + v + "' for type " + state.tierKeyType(), e);
+        }
     }
 
     static String encodePk(Map<String, Object> row, List<String> pkCols, int lineNo) {

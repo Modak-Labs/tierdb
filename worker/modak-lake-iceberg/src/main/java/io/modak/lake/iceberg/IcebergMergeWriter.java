@@ -99,7 +99,8 @@ final class IcebergMergeWriter implements MergeWriter {
         }
         String tierKeyCol = schema.findColumnName(spec.fields().get(0).sourceId());
         GenericRecord probe = GenericRecord.create(schema);
-        probe.setField(tierKeyCol, tierKey);
+        probe.setField(tierKeyCol, TierKeys.internalValue(
+                schema.findField(tierKeyCol).type(), tierKey));
         PartitionKey key = new PartitionKey(spec, schema);
         key.partition(probe);
         return key;

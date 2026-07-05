@@ -11,6 +11,7 @@ import io.modak.common.PartitionId;
 import io.modak.common.PartitionState;
 import io.modak.common.TableId;
 import io.modak.common.TierKey;
+import io.modak.common.TierKeyType;
 import java.sql.Array;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -35,10 +36,10 @@ public final class JdbcCatalog implements Catalog {
     private static final String INSERT_TABLE = """
             INSERT INTO modak.tables
                 (table_id, schema_name, table_name, primary_key_cols, tier_key_col,
-                 partition_scheme, lake_format, lake_table_ref, storage_profile,
+                 tier_key_type, partition_scheme, lake_format, lake_table_ref, storage_profile,
                  mode, publication_name, slot_name, heap_retention_lag, lake_retention_lag,
                  keep_heap)
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     @Override
@@ -50,16 +51,17 @@ public final class JdbcCatalog implements Catalog {
             ps.setString(3, r.tableName());
             ps.setArray(4, pk);
             ps.setString(5, r.tierKeyCol());
-            ps.setString(6, r.partitionScheme());
-            ps.setString(7, r.lakeFormat());
-            ps.setString(8, r.lakeTableRef());
-            ps.setString(9, r.storageProfile());
-            ps.setString(10, r.mode().sql());
-            setNullableString(ps, 11, r.publicationName());
-            setNullableString(ps, 12, r.slotName());
-            setNullableLong(ps, 13, r.heapRetentionLag());
-            setNullableLong(ps, 14, r.lakeRetentionLag());
-            ps.setBoolean(15, r.keepHeap());
+            ps.setString(6, r.tierKeyType().sql());
+            ps.setString(7, r.partitionScheme());
+            ps.setString(8, r.lakeFormat());
+            ps.setString(9, r.lakeTableRef());
+            ps.setString(10, r.storageProfile());
+            ps.setString(11, r.mode().sql());
+            setNullableString(ps, 12, r.publicationName());
+            setNullableString(ps, 13, r.slotName());
+            setNullableLong(ps, 14, r.heapRetentionLag());
+            setNullableLong(ps, 15, r.lakeRetentionLag());
+            ps.setBoolean(16, r.keepHeap());
         });
         return new TableId(r.oid());
     }
@@ -711,7 +713,8 @@ public final class JdbcCatalog implements Catalog {
                 nullableLong(rs, "heap_retention_lag"),
                 nullableLong(rs, "lake_retention_lag"),
                 rs.getBoolean("keep_heap"),
-                MaintenancePolicy.fromJson(rs.getString("maintenance_policy")));
+                MaintenancePolicy.fromJson(rs.getString("maintenance_policy")),
+                TierKeyType.forType(rs.getString("tier_key_type")));
     }
 
     private static Optional<Long> nullableLong(ResultSet rs, String column) throws SQLException {

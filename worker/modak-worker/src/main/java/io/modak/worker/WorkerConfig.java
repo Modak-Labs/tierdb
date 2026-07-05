@@ -17,8 +17,8 @@ public record WorkerConfig(
         String warehouse,
         Map<String, String> lakeConfig,
         long cycleIntervalSeconds,
-        long tieringLag,
-        long reclaimLag,
+        String tieringLag,
+        String reclaimLag,
         int compactionBatchSize,
         int mirrorBatchRows,
         long mirrorFlushMillis,
@@ -62,8 +62,8 @@ public record WorkerConfig(
         private String warehouse = "/tmp/modak-warehouse";
         private Map<String, String> lakeConfig = Map.of();
         private long cycleIntervalSeconds = 10;
-        private long tieringLag = 0;
-        private long reclaimLag = 0;
+        private String tieringLag = "0";
+        private String reclaimLag = "0";
         private int compactionBatchSize = 1000;
         private int mirrorBatchRows = 500;
         private long mirrorFlushMillis = 2000;
@@ -91,8 +91,8 @@ public record WorkerConfig(
         public Builder warehouse(String v) { warehouse = v; return this; }
         public Builder lakeConfig(Map<String, String> v) { lakeConfig = v; return this; }
         public Builder cycleIntervalSeconds(long v) { cycleIntervalSeconds = v; return this; }
-        public Builder tieringLag(long v) { tieringLag = v; return this; }
-        public Builder reclaimLag(long v) { reclaimLag = v; return this; }
+        public Builder tieringLag(String v) { tieringLag = v; return this; }
+        public Builder reclaimLag(String v) { reclaimLag = v; return this; }
         public Builder compactionBatchSize(int v) { compactionBatchSize = v; return this; }
         public Builder mirrorBatchRows(int v) { mirrorBatchRows = v; return this; }
         public Builder mirrorFlushMillis(long v) { mirrorFlushMillis = v; return this; }
@@ -148,9 +148,9 @@ public record WorkerConfig(
         ifSet(env, "MODAK_PG_PASSWORD", b::pgPassword);
         ifSet(env, "MODAK_WAREHOUSE", b::warehouse);
         ifSetLong(env, "MODAK_CYCLE_INTERVAL_SECONDS", b::cycleIntervalSeconds);
-        ifSetLong(env, "MODAK_TIERING_LAG", b::tieringLag);
-        b.reclaimLag(Long.parseLong(env.getOrDefault("MODAK_RECLAIM_LAG",
-                env.getOrDefault("MODAK_TIERING_LAG", "0"))));
+        ifSet(env, "MODAK_TIERING_LAG", b::tieringLag);
+        b.reclaimLag(env.getOrDefault("MODAK_RECLAIM_LAG",
+                env.getOrDefault("MODAK_TIERING_LAG", "0")));
         ifSetInt(env, "MODAK_COMPACTION_BATCH", b::compactionBatchSize);
         ifSetInt(env, "MODAK_MIRROR_BATCH", b::mirrorBatchRows);
         ifSetLong(env, "MODAK_MIRROR_FLUSH_MILLIS", b::mirrorFlushMillis);

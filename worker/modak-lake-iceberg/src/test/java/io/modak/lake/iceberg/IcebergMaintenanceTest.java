@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.modak.common.PartitionBounds;
 import io.modak.common.PartitionId;
+import io.modak.lake.LakePartition;
 import io.modak.common.RowBatchData;
 import io.modak.common.RowBatchData.Column;
 import io.modak.common.RowBatchData.ColumnType;
@@ -56,7 +57,7 @@ class IcebergMaintenanceTest {
         tables = IcebergTables.from(Map.of(), new Configuration());
         ref = tmp.resolve("public.events").toString();
         IcebergTableBootstrap.createIfAbsent(
-                tables, ref, COLUMNS, Set.of("id", "ts"), "ts", 100);
+                tables, ref, COLUMNS, Set.of("id", "ts"), "ts", LakePartition.truncate(100));
     }
 
     private static Map<String, String> props() {

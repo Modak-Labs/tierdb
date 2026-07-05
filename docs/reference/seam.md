@@ -62,6 +62,27 @@ An unpinned read (skip steps 1 and 6, still scan at the captured
 snapshot expiry and file compaction. Pin whenever a scan can outlive the
 maintenance interval.
 
+## Tier key types
+
+Every tier-key value in the catalog (`tier_key_hi`, `retention_line`,
+`modak.delta.tier_key`, `modak.partitions` bounds, pinned values) is a
+canonical `bigint`. The column's native type is in
+`modak.tables.tier_key_type`, and the codec between the two is fixed and
+order-preserving:
+
+| `tier_key_type` | Canonical value |
+|-----------------|-----------------|
+| `bigint` | The value itself |
+| `timestamptz` | Microseconds since `1970-01-01 00:00:00+00` |
+| `timestamp` | Microseconds since `1970-01-01 00:00:00`, the naive value read as UTC |
+| `date` | Days since `1970-01-01` |
+
+A consumer converts at its own boundaries only: encode the native column to
+canonical when comparing rows against `T` or `retention_line`, and render
+canonical values back to native literals when pushing predicates into the
+heap or the lake. Everything between the boundaries stays canonical, so new
+types extend the registry without touching the protocol.
+
 ## The invariants consumers rely on
 
 The worker guarantees all of these, and a consumer may assume them:
