@@ -2,7 +2,7 @@ site_name: tierdb
 site_description: >-
   Fast, transparent and cost-effective data tiering between Postgres and
   Apache Iceberg.
-site_url: https://tierdb-labs.github.io/tierdb/
+site_url: https://modak-labs.github.io/tierdb/
 repo_url: https://github.com/Modak-Labs/tierdb
 repo_name: Modak-Labs/tierdb
 
