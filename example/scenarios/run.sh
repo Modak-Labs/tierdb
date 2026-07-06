@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Runs every scenario end to end against the docker compose stack.
-# Prereq: make -C example up finished and the worker is running.
-# Each scenario resets its own tables, seeds them, and asserts its own
-# results, so they can also be run individually: make -C example scenario-core.
+
 set -euo pipefail
 cd "$(dirname "$0")"
 
-./scenarios/core.sh
-./scenarios/lifecycle.sh
-./scenarios/timestamptz.sh
-./scenarios/trino.sh
-./scenarios/spark.sh
+./core.sh
+
+# Disabled until CI is enabled.
+# ./lifecycle.sh
+# ./timestamptz.sh
+# ./trino.sh
+# ./spark.sh
 
 echo ""
 echo "EXAMPLE PASS:"

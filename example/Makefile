@@ -60,7 +60,7 @@ scenario-%: ## Run one scenario against whatever is up, e.g. make scenario-core
 
 .PHONY: scenarios
 scenarios: ## Run every scenario (run.sh), trino/spark skip unless their overlay is up
-	./run.sh
+	./scenarios/run.sh
 
 .PHONY: help
 help: ## Show this help

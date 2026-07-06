@@ -8,7 +8,7 @@ The full stack runs locally with Docker:
 
 ```bash
 make -C example up
-./example/run.sh
+./example/scenarios/run.sh
 ```
 
 That brings up Postgres with the extension, RustFS, and the worker, then runs the scripted walkthrough. The console lives at http://localhost:9090.
@@ -34,7 +34,7 @@ Docs are MkDocs Material, `mkdocs serve` from the repo root.
 ## Sending changes
 
 - Keep pull requests small and focused on one change.
-- Run the tests above plus `./example/run.sh` against a fresh stack, since the example doubles as the end-to-end suite.
+- Run the tests above plus `./example/scenarios/run.sh` against a fresh stack, since the example doubles as the end-to-end suite.
 - Follow the surrounding code style, and keep comments and docs plain and concise.
 
 Modak is MIT licensed. By contributing you agree your work is too.

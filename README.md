@@ -19,7 +19,7 @@ Run the full loop locally with Docker:
 ```bash
 git clone --recurse-submodules https://github.com/Modak-Labs/modak && cd modak
 make -C example up
-./example/run.sh
+./example/scenarios/run.sh
 ```
 
 That brings up Postgres with the extension, RustFS as the Iceberg warehouse, and the worker, then walks through tiering, corrections, mirroring, and lifecycle end to end. The console lives at [http://localhost:9090](http://localhost:9090).

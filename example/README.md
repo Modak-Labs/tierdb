@@ -44,19 +44,10 @@ Self-contained: each resets its own tables, seeds them, asserts its own results.
 | `stream-load --label name [--token tok]` | POST the file as one labeled HTTP batch. |
 | `sql` | Run the file directly, for generated data. |
 
-Tables (vehicle-fleet theme, one axis each): `trip_events/` (bigint tier key), `gps_pings/` (timestamptz tier key), `vehicles/` (mirrored), `tire_pressure_logs/` (20k rows, kill-and-resume copy), `live.sql` (higher-volume version for `live.sh`).
+Tables (vehicle-fleet theme, one axis each): `trip_events/` (bigint tier key), `gps_pings/` (timestamptz tier key), `vehicles/` (mirrored), `tire_pressure_logs/` (20k rows, kill-and-resume copy).
 
 ## Compose layering
 
 `compose/modak-standalone.yml` or `modak-embedded.yml` picks the topology, `rustfs.yml` always follows, `lakekeeper.yml`/`trino.yml`/`spark.yml` layer on top. `make add-<x>`/`remove-<x>` control it without touching the rest; `EXAMPLE_CATALOG=1`/`EXAMPLE_TRINO=1`/`EXAMPLE_SPARK=1` pick the same overlays for scenario scripts independent of `make`.
 
 `compose/trino/` and `compose/spark/` are sandbox-only, not deployment guides. For real setups see [Trino](../docs/integrations/trino.md) and [Spark](../docs/integrations/spark.md).
-
-## Keeping it running
-
-```bash
-./example/live.sh          # setup (idempotent) + stream until Ctrl-C
-./example/live.sh reset    # offboard the live tables
-```
-
-Streams `trip_events_live`/`gps_pings_live` (two storage profiles) with periodic cold corrections, so [the console](http://localhost:9090) has something live to show.
