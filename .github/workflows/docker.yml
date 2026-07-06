@@ -58,7 +58,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: digests-${{ matrix.image.name }}-${{ matrix.arch.runner }}
+          name: digests--${{ matrix.image.name }}--${{ matrix.arch.runner }}
           path: /tmp/digests/*
           if-no-files-found: error
 
@@ -74,7 +74,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: digests-${{ matrix.image }}-*
+          pattern: digests--${{ matrix.image }}--*
           path: /tmp/digests
           merge-multiple: true
 

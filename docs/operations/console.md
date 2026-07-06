@@ -5,7 +5,7 @@
 The demo walks through the console live: tiering, cross-tier SQL, the delta fold, and an on-demand maintenance pass.
 
 <video controls muted playsinline style="width: 100%; border-radius: 8px;">
-  <source src="https://github.com/user-attachments/assets/8f129f6f-8704-4166-9895-b3300e94be94" type="video/mp4">
+  <source src="https://github.com/user-attachments/assets/778f73eb-732b-4b5a-afe9-50ce59b6dd8c" type="video/mp4">
 </video>
 
 ## Overview
