@@ -47,7 +47,7 @@ The same contract works from outside Postgres. Any engine that can read the cata
 
 ## Execution
 
-The cold branch runs in DuckDB via `pg_duckdb` (`iceberg_scan` on the pinned `metadata_location`). The hot branch is a plain heap scan. DuckDB never decides what is current. TierDB resolves consistency before execution and hands DuckDB a fully specified plan.
+The cold branch runs in DuckDB via `pg_duckdb`, pinned to the format's own immutable snapshot: `iceberg_scan` on the pinned `metadata_location`, or `delta_scan(...) AT (VERSION => n)` on the pinned `table_location`. The hot branch is a plain heap scan. DuckDB never decides what is current. TierDB resolves consistency before execution and hands DuckDB a fully specified plan.
 
 ## Session GUCs
 

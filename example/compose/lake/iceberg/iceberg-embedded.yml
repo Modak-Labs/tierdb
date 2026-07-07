@@ -1,0 +1,8 @@
+x-iceberg-env: &iceberg-env
+  TIERDB_LAKE_FORMAT: iceberg
+
+services:
+  postgres:
+    environment: *iceberg-env
+  worker:
+    environment: *iceberg-env

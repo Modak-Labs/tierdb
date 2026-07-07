@@ -1,10 +1,15 @@
 //! Renders a [`QueryPlan`] into the two-tier SQL shape: hot scan (`tier_key
-//! >= T`) UNION ALL pinned cold Iceberg scan merged with `tierdb.delta`.
+//! >= T`) UNION ALL a pinned cold lake scan (Iceberg or Delta, chosen by
+//! [`LakePin`]) merged with `tierdb.delta`.
+
+use std::collections::BTreeMap;
 
 use crate::domain::TableId;
 use crate::planner::QueryPlan;
 use crate::tier_key::TierKeyType;
 use crate::{TierDBError, Result};
+
+const PIN_TOKEN_SEP: char = '\u{1f}';
 
 /// Everything the renderer needs to know about one registered table.
 /// Assembled by the adapter (tierdb-pg) from `tierdb.tables` + `pg_attribute`.
@@ -17,7 +22,107 @@ pub struct TableMeta {
     pub pk_cols: Vec<String>,
     pub tier_key_col: String,
     pub tier_key_type: TierKeyType,
-    pub lake_metadata_location: String,
+    pub pin: LakePin,
+}
+
+#[derive(Debug, Clone)]
+pub enum LakePin {
+    Iceberg { metadata_location: String },
+    Delta { table_location: String, version: i64 },
+}
+
+impl LakePin {
+    /// Build a pin from the format-neutral catalog row: `lake_format`, the
+    /// `lake_props` map, and `lake_snapshot_id`. Each variant reads only the
+    /// keys it owns, so the caller never names a format-specific key.
+    pub fn from_catalog(
+        format: &str,
+        props: &BTreeMap<String, String>,
+        snapshot: Option<i64>,
+    ) -> Result<LakePin> {
+        match format {
+            "iceberg" => Ok(LakePin::Iceberg {
+                metadata_location: require(props, "metadata_location")?,
+            }),
+            "delta" => Ok(LakePin::Delta {
+                table_location: require(props, "table_location")?,
+                version: snapshot.ok_or_else(|| {
+                    TierDBError::Planning(
+                        "cold tier has no committed lake snapshot yet \
+                         (tierdb.cutline.lake_snapshot_id is NULL)"
+                            .into(),
+                    )
+                })?,
+            }),
+            other => Err(unsupported_format(other)),
+        }
+    }
+
+    /// Opaque, self-describing serialization for the extension-internal SQL
+    /// seam (`tierdb_lake_rows`). Format is the first field; each variant lays
+    /// out its own tail, so the seam never bakes in a fixed handle shape.
+    pub fn to_token(&self) -> String {
+        match self {
+            LakePin::Iceberg { metadata_location } => {
+                format!("iceberg{PIN_TOKEN_SEP}{metadata_location}")
+            }
+            LakePin::Delta {
+                table_location,
+                version,
+            } => format!("delta{PIN_TOKEN_SEP}{table_location}{PIN_TOKEN_SEP}{version}"),
+        }
+    }
+
+    pub fn from_token(token: &str) -> Result<LakePin> {
+        let mut parts = token.split(PIN_TOKEN_SEP);
+        match parts.next().unwrap_or("") {
+            "iceberg" => Ok(LakePin::Iceberg {
+                metadata_location: token_field(parts.next(), "iceberg.metadata_location")?,
+            }),
+            "delta" => Ok(LakePin::Delta {
+                table_location: token_field(parts.next(), "delta.table_location")?,
+                version: token_field(parts.next(), "delta.version")?
+                    .parse::<i64>()
+                    .map_err(|e| {
+                        TierDBError::Planning(format!("delta pin version is not an integer: {e}"))
+                    })?,
+            }),
+            other => Err(unsupported_format(other)),
+        }
+    }
+
+    fn scan_expr(&self) -> String {
+        match self {
+            LakePin::Iceberg { metadata_location } => {
+                format!("iceberg_scan({})", lit(metadata_location))
+            }
+            LakePin::Delta {
+                table_location,
+                version,
+            } => format!("delta_scan({}) AT (VERSION => {version})", lit(table_location)),
+        }
+    }
+}
+
+fn require(props: &BTreeMap<String, String>, key: &str) -> Result<String> {
+    props.get(key).cloned().ok_or_else(|| {
+        TierDBError::Planning(format!(
+            "cold tier has no committed lake snapshot yet \
+             (tierdb.cutline.lake_props->>'{key}' is missing)"
+        ))
+    })
+}
+
+fn token_field(value: Option<&str>, what: &str) -> Result<String> {
+    value
+        .map(str::to_string)
+        .ok_or_else(|| TierDBError::Planning(format!("lake pin token is missing '{what}'")))
+}
+
+fn unsupported_format(format: &str) -> TierDBError {
+    TierDBError::Planning(format!(
+        "unsupported lake_format '{format}' (supported: iceberg, delta)"
+    ))
 }
 
 /// A relation column and its Postgres type name (`format_type()` output).
@@ -84,15 +189,15 @@ pub fn render_scan(plan: &QueryPlan, meta: &TableMeta) -> Result<String> {
     ))
 }
 
-/// The pinned lake scan as one SELECT over `duckdb.query()`. S is pinned by
-/// the immutable metadata_location, `lake_snapshot_id` only orders. The tier
-/// predicate stays outside the DuckDB literal until pg_duckdb picks up the
+/// The pinned lake scan as one SELECT over `duckdb.query()`. S is pinned by the
+/// format's own immutable snapshot (Iceberg metadata path, Delta version). The
+/// tier predicate stays outside the DuckDB literal until pg_duckdb picks up the
 /// duckdb-iceberg#940 fix (DuckDB >= 1.5.2).
 pub fn lake_base_select(meta: &TableMeta) -> String {
     let inner_duckdb_sql = format!(
-        "SELECT {cols} FROM iceberg_scan({path})",
+        "SELECT {cols} FROM {scan}",
         cols = column_list(meta),
-        path = lit(&meta.lake_metadata_location),
+        scan = meta.pin.scan_expr(),
     );
     let base_projection = meta
         .columns
@@ -131,10 +236,10 @@ pub fn render_cold_branch_spooled(t: crate::domain::TierKey, meta: &TableMeta) -
         .collect::<Vec<_>>()
         .join(", ");
     let base = format!(
-        "SELECT {projection}\nFROM tierdb_lake_rows({table_id}, {t}, {path}) j",
+        "SELECT {projection}\nFROM tierdb_lake_rows({table_id}, {t}, {pin_token}) j",
         table_id = meta.table_id.0,
         t = t.0,
-        path = lit(&meta.lake_metadata_location),
+        pin_token = lit(&meta.pin.to_token()),
     );
     render_cold(t, meta, &base)
 }
@@ -230,7 +335,9 @@ mod tests {
             pk_cols: vec!["id".into()],
             tier_key_col: "event_time".into(),
             tier_key_type: TierKeyType::Bigint,
-            lake_metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+            pin: LakePin::Iceberg {
+                metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+            },
         }
     }
 
@@ -297,10 +404,73 @@ WHERE \"event_time\" < 100";
     fn escapes_quotes_in_identifiers_and_paths() {
         let mut m = meta();
         m.hot_table = "we\"ird".into();
-        m.lake_metadata_location = "/wh/o'brien/meta.json".into();
+        m.pin = LakePin::Iceberg {
+            metadata_location: "/wh/o'brien/meta.json".into(),
+        };
         let sql = render_scan(&plan(), &m).unwrap();
         assert!(sql.contains("\"we\"\"ird\""));
         assert!(sql.contains("o''''brien"));
+    }
+
+    #[test]
+    fn delta_pins_the_cold_scan_by_version() {
+        let mut m = meta();
+        m.pin = LakePin::Delta {
+            table_location: "/wh/events".into(),
+            version: 7,
+        };
+        let sql = render_scan(&plan(), &m).unwrap();
+        assert!(
+            sql.contains("delta_scan(''/wh/events'') AT (VERSION => 7)"),
+            "cold half reads Delta pinned by version, got:\n{sql}"
+        );
+        assert!(!sql.contains("iceberg_scan"), "no iceberg_scan for a Delta table");
+    }
+
+    #[test]
+    fn delta_spooled_call_carries_the_opaque_pin_token() {
+        let mut m = meta();
+        m.pin = LakePin::Delta {
+            table_location: "/wh/events".into(),
+            version: 7,
+        };
+        let sql = crate::sqlgen::render_cold_branch_spooled(TierKey(100), &m).unwrap();
+        assert!(
+            sql.contains("tierdb_lake_rows(90001, 100, 'delta\u{1f}/wh/events\u{1f}7')"),
+            "spooled cold half passes the delta pin as one opaque token, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn pin_token_round_trips_for_both_formats() {
+        for pin in [
+            LakePin::Iceberg {
+                metadata_location: "/wh/events/metadata/00002-abc.metadata.json".into(),
+            },
+            LakePin::Delta {
+                table_location: "/wh/events".into(),
+                version: 7,
+            },
+        ] {
+            let back = LakePin::from_token(&pin.to_token()).unwrap();
+            assert_eq!(back.scan_expr(), pin.scan_expr());
+        }
+    }
+
+    #[test]
+    fn from_catalog_reads_only_the_owning_variants_keys() {
+        let mut props = BTreeMap::new();
+        props.insert("metadata_location".to_string(), "/wh/m.json".to_string());
+        props.insert("table_location".to_string(), "/wh/events".to_string());
+
+        let ice = LakePin::from_catalog("iceberg", &props, None).unwrap();
+        assert!(matches!(ice, LakePin::Iceberg { .. }));
+
+        let delta = LakePin::from_catalog("delta", &props, Some(7)).unwrap();
+        assert!(matches!(delta, LakePin::Delta { version: 7, .. }));
+
+        assert!(LakePin::from_catalog("delta", &props, None).is_err());
+        assert!(LakePin::from_catalog("hudi", &props, None).is_err());
     }
 
     #[test]

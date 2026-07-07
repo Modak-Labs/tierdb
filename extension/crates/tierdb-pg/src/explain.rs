@@ -184,7 +184,8 @@ unsafe fn explain_select(query: *mut pg_sys::Query) -> Vec<String> {
                     lit(&meta, cut.t.0)
                 ));
                 lines.push(format!(
-                    "  cold: iceberg pinned at snapshot {}, {} delta row(s) merged, newest wins",
+                    "  cold: {} pinned at snapshot {}, {} delta row(s) merged, newest wins",
+                    meta.lake_format,
                     cut.snapshot.0,
                     delta_backlog(relid),
                 ));
@@ -305,11 +306,11 @@ unsafe fn explain_dml(query: *mut pg_sys::Query, verb: &str) -> Vec<String> {
                 meta.tier_key_col,
                 lit(&meta, cut.t.0)
             ));
-            lines.push(
+            lines.push(format!(
                 "  cold half: matching lake rows become tierdb.delta entries, visible \
-                 immediately, folded into iceberg by the worker"
-                    .into(),
-            );
+                 immediately, folded into {} by the worker",
+                meta.lake_format,
+            ));
             if verb == "UPDATE" && sets_column(query, &meta.tier_key_col) {
                 lines.push(format!(
                     "  tier move: SET touches {}, rows are relocated to where the \

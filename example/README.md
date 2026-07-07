@@ -48,6 +48,14 @@ Tables (vehicle-fleet theme, one axis each): `trip_events/` (bigint tier key), `
 
 ## Compose layering
 
-`compose/tierdb-standalone.yml` or `tierdb-embedded.yml` picks the topology, `rustfs.yml` always follows, `lakekeeper.yml`/`trino.yml`/`spark.yml` layer on top. `make add-<x>`/`remove-<x>` control it without touching the rest; `EXAMPLE_CATALOG=1`/`EXAMPLE_TRINO=1`/`EXAMPLE_SPARK=1` pick the same overlays for scenario scripts independent of `make`.
+The stack is a stack of compose files:
 
-`compose/trino/` and `compose/spark/` are sandbox-only, not deployment guides. For real setups see [Trino](../docs/integrations/trino.md) and [Spark](../docs/integrations/spark.md).
+- `tierdb-standalone.yml` or `tierdb-embedded.yml` sets the topology.
+- `lake/rustfs/` is the local S3 store, always layered.
+- `lake/iceberg/` or `lake/delta/` sets the cold format.
+- `lake/lakekeeper/` is the optional REST catalog.
+- `connector/trino/` and `connector/spark/` add a query engine.
+
+`make add-<x>` and `make remove-<x>` toggle an overlay without touching the rest. For the scenario scripts the same overlays are selected by `EXAMPLE_FORMAT=delta`, `EXAMPLE_CATALOG=1`, `EXAMPLE_TRINO=1`, and `EXAMPLE_SPARK=1`.
+
+`connector/` is sandbox-only, not a deployment guide. For real setups see [Trino](../docs/integrations/trino.md) and [Spark](../docs/integrations/spark.md).

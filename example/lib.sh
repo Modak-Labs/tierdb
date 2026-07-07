@@ -3,22 +3,28 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+EXAMPLE_FORMAT="${EXAMPLE_FORMAT:-iceberg}"
+case "$EXAMPLE_FORMAT" in
+    iceberg|delta) ;;
+    *) echo "EXAMPLE_FORMAT must be 'iceberg' or 'delta', got '$EXAMPLE_FORMAT'" >&2; exit 1 ;;
+esac
+
 if [ "${EXAMPLE_EMBEDDED:-0}" = "1" ]; then
-    COMPOSE_FILE=example/compose/tierdb-embedded.yml:example/compose/rustfs.yml:example/compose/rustfs-embedded.yml
+    COMPOSE_FILE=example/compose/tierdb-embedded.yml:example/compose/lake/rustfs/rustfs.yml:example/compose/lake/rustfs/rustfs-embedded.yml:example/compose/lake/${EXAMPLE_FORMAT}/${EXAMPLE_FORMAT}-embedded.yml
 else
-    COMPOSE_FILE=example/compose/tierdb-standalone.yml:example/compose/rustfs.yml
+    COMPOSE_FILE=example/compose/tierdb-standalone.yml:example/compose/lake/rustfs/rustfs.yml:example/compose/lake/${EXAMPLE_FORMAT}/${EXAMPLE_FORMAT}.yml
 fi
 
 if [ "${EXAMPLE_CATALOG:-0}" = "1" ]; then
-    COMPOSE_FILE="$COMPOSE_FILE:example/compose/lakekeeper.yml"
+    COMPOSE_FILE="$COMPOSE_FILE:example/compose/lake/lakekeeper/lakekeeper.yml"
 fi
 
 if [ "${EXAMPLE_TRINO:-0}" = "1" ]; then
-    COMPOSE_FILE="$COMPOSE_FILE:example/compose/trino.yml"
+    COMPOSE_FILE="$COMPOSE_FILE:example/compose/connector/trino.yml"
 fi
 
 if [ "${EXAMPLE_SPARK:-0}" = "1" ]; then
-    COMPOSE_FILE="$COMPOSE_FILE:example/compose/spark.yml"
+    COMPOSE_FILE="$COMPOSE_FILE:example/compose/connector/spark.yml"
 fi
 
 export COMPOSE_FILE

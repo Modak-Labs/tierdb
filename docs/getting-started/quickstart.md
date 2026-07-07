@@ -14,7 +14,7 @@ git clone --recurse-submodules https://github.com/Modak-Labs/tierdb && cd tierdb
 make -C example up
 ```
 
-`example/compose/tierdb-standalone.yml` wires together the two images TierDB ships, Postgres with the extension and the worker, parameterized by env vars for your own Postgres and S3 (see [Production deployment](../operations/production.md)). `example/compose/rustfs.yml` layers in RustFS, a local S3-compatible stand-in, so the stack above is runnable without a cloud account:
+`example/compose/tierdb-standalone.yml` wires together the two images TierDB ships, Postgres with the extension and the worker, parameterized by env vars for your own Postgres and S3 (see [Production deployment](../operations/production.md)). `example/compose/lake/rustfs/rustfs.yml` layers in RustFS, a local S3-compatible stand-in, so the stack above is runnable without a cloud account:
 
 | Service | Role |
 |---------|------|

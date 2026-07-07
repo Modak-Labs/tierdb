@@ -15,10 +15,11 @@ pub(crate) struct WriteMeta {
     pub tier_key_col: String,
     pub tier_key_type: TierKeyType,
     pub keep_heap: bool,
+    pub lake_format: String,
 }
 
 const WRITE_META_SQL: &str = "SELECT schema_name, table_name, primary_key_cols, tier_key_col, \
-            tier_key_type, keep_heap \
+            tier_key_type, keep_heap, lake_format \
      FROM tierdb.tables WHERE table_id = $1";
 
 pub(crate) const UPSERT_DELTA_SQL: &str = "INSERT INTO tierdb.delta AS d \
@@ -73,6 +74,10 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             .get_by_name::<bool, _>("keep_heap")
             .map_err(catalog_err)?
             .unwrap_or(false);
+        let lake_format = row
+            .get_by_name::<String, _>("lake_format")
+            .map_err(catalog_err)?
+            .unwrap_or_else(|| "iceberg".into());
         if pk_cols.is_empty() {
             return Err(TierDBError::Planning(format!(
                 "table {table:?} has no primary key columns"
@@ -85,6 +90,7 @@ pub(crate) fn write_meta(table: TableId) -> Result<WriteMeta> {
             tier_key_col: tier,
             tier_key_type: TierKeyType::from_name(&tier_type)?,
             keep_heap,
+            lake_format,
         })
     })
 }

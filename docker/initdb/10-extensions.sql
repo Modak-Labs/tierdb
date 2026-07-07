@@ -2,7 +2,10 @@ CREATE EXTENSION IF NOT EXISTS pg_duckdb;
 CREATE EXTENSION tierdb;
 
 SELECT duckdb.install_extension('httpfs');
+
+-- Use dynamic extension installation later.
 SELECT duckdb.install_extension('iceberg');
+SELECT duckdb.install_extension('delta');
 
 ALTER SYSTEM SET duckdb.max_workers_per_postgres_scan = 0;
 

@@ -1,0 +1,4 @@
+services:
+  worker:
+    environment:
+      TIERDB_LAKE_FORMAT: iceberg

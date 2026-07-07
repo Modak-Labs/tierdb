@@ -19,7 +19,7 @@ tierdb-worker profile list
 |------|---------|
 | `--name` | Profile name, referenced at `register` time |
 | `--warehouse` | Warehouse root (`s3://...`, `gs://...`, or a filesystem path) |
-| `--format` | Lake format plugin id. Omit to use the worker's `TIERDB_LAKE_FORMAT` |
+| `--format` | Lake format plugin id (`iceberg`, `delta`). Omit to use the worker's `TIERDB_LAKE_FORMAT` |
 | `--config` | Semicolon-separated `key=value` overrides, same keys as `TIERDB_LAKE_PROPS`. A blank value (`key=`) removes an inherited default |
 | `--credentials` | Credential reference (see below). Omit to use the worker's default credentials |
 | `--default` | Make this the default profile for new registrations |
@@ -60,7 +60,7 @@ A worker that lacks the referenced variable fails loudly the first time it touch
 
 ## The read path
 
-Workers write; `iceberg_scan()` inside Postgres reads, and DuckDB needs its own secret per warehouse. Register one scoped secret per profile:
+Workers write; `iceberg_scan()` / `delta_scan()` inside Postgres reads, and DuckDB needs its own secret per warehouse. Register one scoped secret per profile:
 
 ```sql
 SELECT duckdb.create_simple_secret(

@@ -27,7 +27,7 @@ A conforming pinned read of one table:
 
 2. Scan the hot branch: the Postgres table with `tier_key >= T`.
 
-3. Scan the cold branch pinned at S. `lake_props` sits on the cut-line row and carries two equivalent handles, published atomically with every advance: `metadata_location` for engines that scan a metadata file directly (DuckDB `iceberg_scan`), and `snapshot_id` for engines that pin through a catalog (Trino `FOR VERSION AS OF`, Spark `VERSION AS OF`). Never read "current", since the current snapshot can be newer than the T you captured.
+3. Scan the cold branch pinned at S. `lake_props` sits on the cut-line row and carries the format's own handles, published atomically with every advance. Iceberg publishes `metadata_location` for engines that scan a metadata file directly (DuckDB `iceberg_scan`) and `snapshot_id` for engines that pin through a catalog (Trino `FOR VERSION AS OF`, Spark `VERSION AS OF`); Delta publishes `table_location`, pinned by the integer version carried in `lake_snapshot_id` (DuckDB `delta_scan(...) AT (VERSION => n)`, Spark `versionAsOf`). Never read "current", since the current snapshot can be newer than the T you captured.
 
 4. Merge the delta over the cold branch, newest wins: for every `tierdb.delta` row for this table, an `op = 0` row replaces the cold row with the same PK (or adds it if absent), and an `op = 1` row removes it. When several candidates exist for one PK, the largest `version` wins. The hot branch is never merged against the delta.
 
@@ -65,6 +65,18 @@ The worker guarantees all of these, and a consumer may assume them:
 ## Mirrored tables
 
 A mirrored table's heap is complete, so the default read is a plain heap scan with no seam involved. The seam state for mirrored tables is the frontier `F` (`tierdb.cutline.replicated_lsn`): everything committed at or below `F` is provably in the lake. A consumer that wants to serve a mirrored read from the lake follows the hybrid recipe: wait until `F` passes the WAL position its snapshot requires, then split at a tier-key point of its choosing. A mirrored table registered with retention has shed heap partitions and reads exactly like a tiered table. It writes like one too: its cut-line sits at the drop boundary, corrections below it are delta rows, and the pump folds them into the mirror.
+
+## Format neutrality
+
+The protocol carries only two things about a format. `tierdb.tables.lake_format` is the plugin id. `tierdb.cutline.lake_props` is an opaque `key -> value` map the format publishes with every advance. No format-agnostic code names a key that belongs to one format. A consumer reads `lake_format`, hands it and `lake_props` to the one place that knows that format, and gets back a pinned cold scan.
+
+Each runtime surface has exactly one such dispatch point:
+
+- The worker resolves the plugin by id through the `ServiceLoader`. The plugin returns its own publish map, so the registrar and pump store `lake_props` without a format switch.
+- The extension builds a `LakePin` from `lake_format`, `lake_props`, and `lake_snapshot_id` at the catalog boundary, then carries it as an opaque token across the internal `tierdb_lake_rows` seam.
+- A connector maps `lake_format` to its reader once (Spark's `LakeColdFormat`).
+
+Adding a format is a new plugin plus one arm at each dispatch point. It touches no shared read, merge, or catalog code.
 
 ## Compatibility
 

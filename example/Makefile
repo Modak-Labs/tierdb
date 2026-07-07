@@ -9,14 +9,16 @@
 
 export COMPOSE_PROJECT_NAME := tierdb
 
+EXAMPLE_FORMAT ?= iceberg
+
 .DEFAULT_GOAL := help
 
 .PHONY: up
-up: ## Bring up the example sandbox (EXAMPLE_EMBEDDED=1 for embedded mode)
+up: ## Bring up the example sandbox (EXAMPLE_EMBEDDED=1 embedded, EXAMPLE_FORMAT=delta)
 	@if [ "$(EXAMPLE_EMBEDDED)" = "1" ]; then \
-		echo "COMPOSE_FILE=compose/tierdb-embedded.yml:compose/rustfs.yml:compose/rustfs-embedded.yml" > .env; \
+		echo "COMPOSE_FILE=compose/tierdb-embedded.yml:compose/lake/rustfs/rustfs.yml:compose/lake/rustfs/rustfs-embedded.yml:compose/lake/$(EXAMPLE_FORMAT)/$(EXAMPLE_FORMAT)-embedded.yml" > .env; \
 	else \
-		echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/rustfs.yml" > .env; \
+		echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/lake/rustfs/rustfs.yml:compose/lake/$(EXAMPLE_FORMAT)/$(EXAMPLE_FORMAT).yml" > .env; \
 	fi
 	docker compose up -d
 
@@ -27,7 +29,7 @@ down: ## Tear down the example sandbox and remove all data
 
 .PHONY: patch
 patch: ## Build images from local source and restart changed services, no teardown
-	@test -f .env || echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/rustfs.yml" > .env
+	@test -f .env || echo "COMPOSE_FILE=compose/tierdb-standalone.yml:compose/lake/rustfs/rustfs.yml:compose/lake/iceberg/iceberg.yml" > .env
 	docker compose up -d --build
 
 .PHONY: status
@@ -38,8 +40,8 @@ status: ## Show which overlays are currently layered in
 add-%: ## Layer in an overlay without touching what is already up, e.g. make add-trino
 	@test -f .env || { echo "example is down, run make up first"; exit 1; }
 	@current=$$(grep '^COMPOSE_FILE=' .env | cut -d= -f2-); \
-	layer=compose/$*.yml; \
-	test -f $$layer || { echo "no such overlay: $$layer"; exit 1; }; \
+	layer=$$(ls compose/$*.yml compose/connector/$*.yml compose/lake/$*/$*.yml 2>/dev/null | head -1); \
+	test -n "$$layer" || { echo "no such overlay: $*"; exit 1; }; \
 	case ":$$current:" in \
 		*":$$layer:"*) ;; \
 		*) echo "COMPOSE_FILE=$$current:$$layer" > .env ;; \
@@ -50,7 +52,7 @@ add-%: ## Layer in an overlay without touching what is already up, e.g. make add
 remove-%: ## Drop an overlay and stop its services, e.g. make remove-trino
 	@test -f .env || { echo "example is down, run make up first"; exit 1; }
 	@current=$$(grep '^COMPOSE_FILE=' .env | cut -d= -f2-); \
-	layer=compose/$*.yml; \
+	layer=$$(ls compose/$*.yml compose/connector/$*.yml compose/lake/$*/$*.yml 2>/dev/null | head -1); \
 	new=$$(printf '%s' "$$current" | tr ':' '\n' | grep -v "^$$layer$$" | paste -sd: -); \
 	echo "COMPOSE_FILE=$$new" > .env
 	docker compose up -d --remove-orphans

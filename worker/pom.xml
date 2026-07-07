@@ -41,6 +41,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <iceberg.version>1.11.0</iceberg.version>
+        <delta.version>4.3.0</delta.version>
         <hadoop.version>3.4.1</hadoop.version>
         <spark.version>3.5.3</spark.version>
         <trino.version>472</trino.version>
@@ -80,6 +81,11 @@
             <dependency>
                 <groupId>io.tierdb</groupId>
                 <artifactId>tierdb-iceberg</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tierdb</groupId>
+                <artifactId>tierdb-delta</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -138,6 +144,17 @@
                 <groupId>org.apache.iceberg</groupId>
                 <artifactId>iceberg-spark-runtime-3.5_2.12</artifactId>
                 <version>${iceberg.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>io.delta</groupId>
+                <artifactId>delta-kernel-api</artifactId>
+                <version>${delta.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.delta</groupId>
+                <artifactId>delta-kernel-defaults</artifactId>
+                <version>${delta.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.spark</groupId>

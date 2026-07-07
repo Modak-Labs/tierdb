@@ -9,7 +9,7 @@ Maintenance is also optional. Every pass can be disabled per table or fleet wide
 The design splits ownership along the same seam as the rest of TierDB:
 
 - **TierDB owns scheduling, policy, and safety.** It decides when a pass runs, resolves the settings, and computes two bounds every pass must honor: no snapshot at or above the oldest pinned reader horizon may expire (pinned reads scan an old `metadata_location` whose files must stay put), and staged [Stream Load](../ingestion/stream-load.md) files awaiting adoption must never be deleted.
-- **The format plugin owns the work.** Which operations exist, what the policy keys mean, and what a pass reports are Iceberg's business today and a future format's tomorrow. Nothing in the catalog, console, or metrics assumes Iceberg's vocabulary.
+- **The format plugin owns the work.** Which operations exist, what the policy keys mean, and what a pass reports belong to the format plugin: Iceberg's rewrite/expiry vocabulary, Delta's `OPTIMIZE`/`VACUUM`, or a future format's. Nothing in the catalog, console, or metrics assumes any one format's vocabulary.
 
 ### What must stay with TierDB
 
@@ -103,6 +103,18 @@ Snapshot expiry: snapshots older than `snapshot_retention_hours` are expired, al
 Orphan sweep (opt-in): files in the table's data directory older than `orphan_grace_hours` that no retained snapshot references are deleted. Only a crash between write and commit produces such files, so it is off by default. Separately and always on, staged files of loads that ended in `failed` are deleted after the same grace period, driven by the load journal rather than listing.
 
 Every non-noop pass is journaled in `tierdb.op_log` with its counters, and the console's table page shows the last pass next to the policy in force.
+
+## What a pass does (Delta)
+
+Delta tables run through `delta-spark`, so the vocabulary is Delta's, not Iceberg's. The pass honors the same two TierDB-owned bounds: the pinned reader horizon (Delta pins by integer version, so VACUUM retention is widened to keep every file the pinned version needs for time travel) and staged-load protection.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `optimize_enabled` | `true` | `OPTIMIZE` small-file bin-pack on/off |
+| `vacuum_enabled` | `true` | `VACUUM` orphan/expired data-file removal on/off |
+| `vacuum_retention_hours` | `168` | Floor retention; widened automatically to preserve the pinned version |
+
+`OPTIMIZE` is snapshot-additive and externally safe. `VACUUM` deletes files, so it stays with TierDB for the same reason Iceberg's expiry does: only TierDB knows the pinned horizon and which staged loads await adoption.
 
 ## Forcing a pass
 
