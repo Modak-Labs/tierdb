@@ -43,6 +43,13 @@ jobs:
       - name: Initialize pgrx
         run: cargo pgrx init --pg17 /usr/lib/postgresql/17/bin/pg_config
 
+      - name: Grant write access to the Postgres extension dirs
+        run: |
+          PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config
+          sudo chown -R "$(id -u):$(id -g)" \
+            "$("$PG_CONFIG" --sharedir)/extension" \
+            "$("$PG_CONFIG" --pkglibdir)"
+
       - name: rustfmt + clippy
         run: make check-extension
 
