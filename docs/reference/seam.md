@@ -1,6 +1,6 @@
 # The seam protocol
 
-The consistency seam is not private to the Postgres extension. Everything a reader needs to produce a correct two-tier view lives in plain catalog tables, maintained by the worker. The extension is the reference consumer: it reads the same rows any other engine would. This page specifies the contract so other consumers (Trino, Spark, DuckDB standalone, your own tooling) can implement the same read with the same guarantees.
+The consistency seam is not private to the Postgres extension. Everything a reader needs to produce a correct two-tier view lives in plain catalog tables, maintained by the worker. The extension is the reference consumer: it reads the same rows any other engine would. This page specifies the contract so other consumers (Trino, Spark, your own tooling) can implement the same read with the same guarantees.
 
 The catalog DDL is `sql/catalog.sql`, and [Catalog schema](catalog.md) describes each table operationally. This page covers the semantics a consumer must honor.
 
@@ -80,7 +80,7 @@ The `tierdb` Postgres extension is the reference consumer, running this protocol
 
 ## One vocabulary, two runtimes
 
-The routing policy of this page is implemented twice, once in Rust for the extension and DuckDB (`tierdb-core`) and once in Java for the connectors and the worker, because the two stacks cannot share a runtime. Both express it through the same constructs, name for name:
+The routing policy of this page is implemented twice, once in Rust for the extension (`tierdb-core`) and once in Java for the connectors and the worker, because the two stacks cannot share a runtime. Both express it through the same constructs, name for name:
 
 | Concept | Rust | Java |
 |---------|------|------|

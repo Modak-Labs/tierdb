@@ -12,7 +12,6 @@ Connectors share `tierdb-connector`, a small engine-agnostic library covering th
 |-----------|--------|
 | [Spark](spark.md) | Available |
 | [Trino](trino.md) | Available |
-| DuckDB | Planned |
 | Athena | Planned |
 
 ## Writes: Stream Load

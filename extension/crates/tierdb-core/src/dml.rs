@@ -212,7 +212,7 @@ pub fn retention_rejects(tier_key: i64, retention_line: Option<i64>) -> bool {
     matches!(retention_line, Some(line) if tier_key < line)
 }
 
-pub(crate) fn lake_merge_sql(
+pub fn lake_merge_sql(
     target: &str,
     columns: &[String],
     pk_cols: &[String],
@@ -786,6 +786,47 @@ mod tests {
         assert!(
             sql.contains(
                 "old_tier_key = NULLIF(COALESCE(d.old_tier_key, d.tier_key), EXCLUDED.tier_key)"
+            ),
+            "{sql}"
+        );
+    }
+
+    #[test]
+    fn lake_merge_upserts_by_pk_in_one_statement() {
+        let columns = vec![
+            "id".to_string(),
+            "event_time".to_string(),
+            "val".to_string(),
+        ];
+        let pk_cols = vec!["id".to_string()];
+        let rows = vec![
+            vec!["1".to_string(), "50".to_string(), "'a'".to_string()],
+            vec!["2".to_string(), "60".to_string(), "'b'".to_string()],
+        ];
+        let sql = lake_merge_sql(
+            "\"lake\".\"tierdb\".\"public_events\"",
+            &columns,
+            &pk_cols,
+            &rows,
+        );
+
+        assert!(
+            sql.starts_with("MERGE INTO \"lake\".\"tierdb\".\"public_events\" AS t"),
+            "{sql}"
+        );
+        assert!(sql.contains("(VALUES (1, 50, 'a'), (2, 60, 'b'))"), "{sql}");
+        assert!(sql.contains("ON t.\"id\" = s.\"id\""), "{sql}");
+        assert!(
+            sql.contains(
+                "WHEN MATCHED THEN UPDATE SET \"event_time\" = s.\"event_time\", \
+                 \"val\" = s.\"val\""
+            ),
+            "matched arm updates only non-pk columns:\n{sql}"
+        );
+        assert!(
+            sql.contains(
+                "WHEN NOT MATCHED THEN INSERT (\"id\", \"event_time\", \"val\") \
+                 VALUES (s.\"id\", s.\"event_time\", s.\"val\")"
             ),
             "{sql}"
         );
