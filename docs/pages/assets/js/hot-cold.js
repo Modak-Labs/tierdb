@@ -2,7 +2,7 @@
   var BUBBLES = [
     {
       left: 21,
-      top: 34,
+      top: 28,
       text: "Hot Store",
       tail: "se",
     },

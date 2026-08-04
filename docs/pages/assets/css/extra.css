@@ -18,6 +18,8 @@
   --tierdb-drawer-bar-height: 2.4rem;
   --tierdb-nav-list-pad: 0.35rem 0.45rem 1rem;
   --tierdb-logo-height: 1.75rem;
+  --tierdb-crew-width: 65%;
+  --tierdb-hot-cold-width: 62%;
   --tierdb-code-fg: #c7254e;
   --tierdb-code-bg: #fdf2f4;
   --tierdb-font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -378,8 +380,10 @@ body,
 
 .tierdb-crew {
   display: block;
-  width: 100%;
-  margin: 0 0 1rem;
+  width: var(--tierdb-crew-width);
+  max-width: 8.5rem;
+  margin: 0 auto 0.75rem;
+  transform: translateX(-0.7rem);
   pointer-events: none;
   user-select: none;
 }
@@ -417,7 +421,7 @@ body,
 
 .tierdb-hot-cold {
   display: block;
-  margin: 0 auto 2rem;
+  margin: 0 auto 1.5rem;
   padding-top: 1.5rem;
   overflow: visible;
 }
@@ -430,7 +434,8 @@ body,
 
 .tierdb-hot-cold__stage img {
   display: block;
-  width: 70%;
+  width: var(--tierdb-hot-cold-width);
+  max-width: 32rem;
   height: auto;
   margin: 0 auto;
 }
