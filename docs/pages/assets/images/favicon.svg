@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="c" x1="1" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#B8E4F5"/>
+      <stop offset="55%" stop-color="#8FCFE8"/>
+      <stop offset="100%" stop-color="#6BB5D4"/>
+    </linearGradient>
+    <linearGradient id="h" x1="1" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#FFC9A8"/>
+      <stop offset="55%" stop-color="#F2B08A"/>
+      <stop offset="100%" stop-color="#E0926A"/>
+    </linearGradient>
+    <mask id="cut" maskUnits="userSpaceOnUse">
+      <rect width="64" height="64" fill="white"/>
+      <g transform="translate(22 32) rotate(45)">
+        <rect x="-18" y="-18" width="36" height="36" rx="11" fill="black"/>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#cut)">
+    <g transform="translate(42 32) rotate(45)">
+      <rect x="-17" y="-17" width="34" height="34" rx="7" fill="url(#c)"/>
+    </g>
+  </g>
+  <g transform="translate(22 32) rotate(45)">
+    <rect x="-15" y="-15" width="30" height="30" rx="6" fill="url(#h)"/>
+  </g>
+</svg>

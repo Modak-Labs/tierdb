@@ -4,34 +4,26 @@ site_description: >-
   Apache Iceberg.
 site_url: https://modak-labs.github.io/tierdb/
 repo_url: https://github.com/Modak-Labs/tierdb
-repo_name: Modak-Labs/tierdb
+repo_name: tierdb
+
+docs_dir: pages
+site_dir: ../site
 
 theme:
   name: material
-  logo: assets/logo.svg
-  favicon: assets/favicon.svg
+  custom_dir: overrides
+  logo: assets/images/logo.svg
+  favicon: assets/images/favicon.svg
   icon:
     repo: fontawesome/brands/github
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: octicons/sun-24
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: octicons/moon-24
-        name: Switch to light mode
+    scheme: default
+    primary: custom
+    accent: custom
   font:
     text: Inter
     code: JetBrains Mono
   features:
-    - navigation.footer
     - navigation.top
     - content.code.copy
     - search.suggest
@@ -42,6 +34,11 @@ extra_css:
 
 extra_javascript:
   - assets/js/nav.js
+  - assets/js/mascots.js
+  - assets/js/hot-cold.js
+
+extra:
+  generator: false
 
 markdown_extensions:
   - admonition

@@ -21,6 +21,8 @@ Both tiers stay real, independently usable systems:
 - A real Postgres you run OLTP on. TierDB is an extension plus a schema, not a fork or a proxy.
 - A real Iceberg warehouse any engine can read. Spark, Trino, and DuckDB see standard Iceberg tables with no TierDB anywhere.
 
+![Hot store aging into cold store](assets/images/hot-cold.png)
+
 TierDB owns only the glue: routing, tiering, mirroring, and the consistency protocol that makes a two-tier table read like one table.
 
 ## What deploys where

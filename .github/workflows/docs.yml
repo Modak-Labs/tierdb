@@ -3,7 +3,9 @@ name: docs
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml"]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -20,11 +22,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
-      - run: pip install 'mkdocs-material>=9,<10' 'mkdocs<2'
-      - run: mkdocs build --strict
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: docs/requirements-docs.txt
+
+      - name: Install docs dependencies
+        run: pip install -r docs/requirements-docs.txt
+
+      - name: Build site
+        working-directory: docs
+        run: mkdocs build --strict
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
@@ -37,4 +48,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

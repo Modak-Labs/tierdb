@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <defs>
+    <linearGradient id="gCold" x1="1" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#B8E4F5"/>
+      <stop offset="55%" stop-color="#8FCFE8"/>
+      <stop offset="100%" stop-color="#6BB5D4"/>
+    </linearGradient>
+    <linearGradient id="gHot" x1="1" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#FFC9A8"/>
+      <stop offset="55%" stop-color="#F2B08A"/>
+      <stop offset="100%" stop-color="#E0926A"/>
+    </linearGradient>
+    <linearGradient id="gSheen" x1="1" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="coldCut" maskUnits="userSpaceOnUse">
+      <rect width="120" height="120" fill="white"/>
+      <g transform="translate(42 60) rotate(45)">
+        <rect x="-34" y="-34" width="68" height="68" rx="22" fill="black"/>
+      </g>
+    </mask>
+  </defs>
+
+  <g mask="url(#coldCut)">
+    <g transform="translate(78 60) rotate(45)">
+      <rect x="-32" y="-32" width="64" height="64" rx="14" fill="url(#gCold)"/>
+      <rect x="-32" y="-32" width="64" height="64" rx="14" fill="url(#gSheen)"/>
+    </g>
+  </g>
+  <g transform="translate(42 60) rotate(45)">
+    <rect x="-28" y="-28" width="56" height="56" rx="13" fill="url(#gHot)"/>
+    <rect x="-28" y="-28" width="56" height="56" rx="13" fill="url(#gSheen)"/>
+  </g>
+</svg>
